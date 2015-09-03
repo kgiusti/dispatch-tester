@@ -11,9 +11,6 @@ $ qpid-config add queue "Broker.KEN" -b amqps://127.0.0.1 --ssl-certificate ~/DI
 
 # pyngus examples run from a virtualenv:
 
-$ ./recv.py -a amqp://0.0.0.0:7777 --source "Broker.KEN"
-
-
 $ ./send.py --ca ~/DISPATCH/SSL/test_cert_dir/ca_cert.pem --ssl-cert-file ~/DISPATCH/SSL/test_cert_dir/router-client-certificate.pem --ssl-key-file ~/DISPATCH/SSL/test_cert_dir/router-client-private-key.pem --ssl-key-password password --sasl-config-dir ~/DISPATCH/qpidd/sasl2 --sasl-config-name qpidd -a amqp://127.0.0.1:8888 --target "Broker.KEN" "A Message" 
 
 $ ./recv.py --ca ~/DISPATCH/SSL/test_cert_dir/ca_cert.pem --ssl-cert-file ~/DISPATCH/SSL/test_cert_dir/router-client-certificate.pem --ssl-key-file ~/DISPATCH/SSL/test_cert_dir/router-client-private-key.pem --ssl-key-password password --sasl-config-dir ~/DISPATCH/qpidd/sasl2 --sasl-config-name qpidd -a amqp://127.0.0.1:7777 --source "Broker.KEN"

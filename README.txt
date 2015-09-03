@@ -1,22 +1,22 @@
-$ qpidd --config /home/kgiusti/DISPATCH/qpidd/qpidd.conf   --log-enable trace+:Security --log-enable trace+:Protocol 
+A dispatch test setup hardcoded to my particular environment.
 
-$ qdrouterd -c ~/DISPATCH/RouterA/etc/qpid-dispatch/qdrouter.conf
-$ qdrouterd -c ~/DISPATCH/RouterB/etc/qpid-dispatch/qdrouter.conf
+Creates a small dispatch network:
 
-$ qdstat -g -b 127.0.0.1:7777 --ssl-certificate ~/DISPATCH/SSL/test_cert_dir/router-client-certificate.pem --ssl-key ~/DISPATCH/SSL/test_cert_dir/router-client-private-key.pem --ssl-trustfile ~/DISPATCH/SSL/test_cert_dir/ca_cert.pem 
+     +--------------+            +------------------+
+     |RouterA       |----------->|QPIDD Broker      |
+     |127.0.0.1:7777|            | 127.0.0.1:5672/1 |
+     +--------------+            +------------------+
+         |
+         |
+         V
+     +--------------+
+     |RouterB       |
+     |127.0.0.1:8888|
+     +--------------+
 
-# Broker config
+* A link route is configured to the broker for the address prefix "Broker."
+* SASL EXTERNAL is configured
+* SSL is configured, and is used for client authentication
 
-$ qpid-config add queue "Broker.KEN" -b amqps://127.0.0.1 --ssl-certificate ~/DISPATCH/SSL/test_cert_dir/router-client-certificate.pem --ssl-key ~/DISPATCH/SSL/test_cert_dir/router-client-private-key.pem 
-
-# pyngus examples run from a virtualenv:
-
-$ ./recv.py -a amqp://0.0.0.0:7777 --source "Broker.KEN"
-
-
-$ ./send.py --ca ~/DISPATCH/SSL/test_cert_dir/ca_cert.pem --ssl-cert-file ~/DISPATCH/SSL/test_cert_dir/router-client-certificate.pem --ssl-key-file ~/DISPATCH/SSL/test_cert_dir/router-client-private-key.pem --ssl-key-password password --sasl-config-dir ~/DISPATCH/qpidd/sasl2 --sasl-config-name qpidd -a amqp://127.0.0.1:8888 --target "Broker.KEN" "A Message" 
-
-$ ./recv.py --ca ~/DISPATCH/SSL/test_cert_dir/ca_cert.pem --ssl-cert-file ~/DISPATCH/SSL/test_cert_dir/router-client-certificate.pem --ssl-key-file ~/DISPATCH/SSL/test_cert_dir/router-client-private-key.pem --ssl-key-password password --sasl-config-dir ~/DISPATCH/qpidd/sasl2 --sasl-config-name qpidd -a amqp://127.0.0.1:7777 --source "Broker.KEN"
-
-$ qpid-stat -q -b amqps://127.0.0.1 --ssl-certificate ~/DISPATCH/SSL/test_cert_dir/router-client-certificate.pem --ssl-key ~/DISPATCH/SSL/test_cert_dir/router-client-private-key.pem 
+See HOWTO.txt for commands used to run the tests
 
