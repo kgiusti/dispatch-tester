@@ -88,13 +88,23 @@ create_certs() {
     rm ${TEST_CERT_DIR}/broker.req
     rm ${TEST_CERT_DIR}/broker.crt
 
+
+    # create a certificate to identify broker clients
+    #
+    certutil -R -d ${CERT_DB} -s "CN=${TEST_CLIENT_CERT}" -o ${TEST_CERT_DIR}/client.req -f ${CERT_PW_FILE} -z /bin/sh > /dev/null 2>&1
+    certutil -C -d ${CERT_DB} -c "Test-CA" -8 "*.client.com" -i ${TEST_CERT_DIR}/client.req -o ${TEST_CERT_DIR}/client.crt -f ${CERT_PW_FILE} -m ${RANDOM}
+    certutil -A -d ${CERT_DB} -n ${TEST_CLIENT_CERT} -i ${TEST_CERT_DIR}/client.crt -t "Pu,,"
+    rm ${TEST_CERT_DIR}/client.req
+    rm ${TEST_CERT_DIR}/client.crt
+
+
     # extract the CA's certificate
     $PK12UTIL -o ${TEST_CERT_DIR}/CA_pk12.out -d ${CERT_DB} -n "Test-CA"  -w ${CERT_PW_FILE} -k ${CERT_PW_FILE} > /dev/null
     $OPENSSL pkcs12 -in ${TEST_CERT_DIR}/CA_pk12.out -out ${CA_PEM_FILE} -nokeys -passin file:${CERT_PW_FILE} >/dev/null
 
 
     # Create a certificate for the server end of an inter-router connection.  Use the CA's certificate to sign it:
-    keytool -storetype pkcs12 -keystore ${TEST_CERT_DIR}/router-server.pkcs12 -storepass password -alias router-server-certificate -keypass password -genkey  -dname "O=Server,CN=A1.Good.Server.domain.com" -validity 99999
+    keytool -storetype pkcs12 -keystore ${TEST_CERT_DIR}/router-server.pkcs12 -storepass password -alias router-server-certificate -keypass password -genkey  -dname "CN=127.0.0.1" -ext san=dns:localhost,dns:localhost.localdomain -validity 99999
     keytool -storetype pkcs12 -keystore ${TEST_CERT_DIR}/router-server.pkcs12 -storepass password -alias router-server-certificate -keypass password -certreq -file router-server-request.pem
     keytool -storetype pkcs12 -keystore ${TEST_CERT_DIR}/CA_pk12.out -storepass password -alias "Test-CA" -keypass password -gencert -rfc -validity 99999 -infile router-server-request.pem -outfile ${TEST_CERT_DIR}/router-server-certificate.pem
     openssl pkcs12 -nocerts -passin pass:password -in ${TEST_CERT_DIR}/router-server.pkcs12 -passout pass:password -out ${TEST_CERT_DIR}/router-server-private-key.pem
