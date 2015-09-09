@@ -87,6 +87,8 @@ def main(argv=None):
                       help="Address for link target.")
     parser.add_option("--trace", dest="trace", action="store_true",
                       help="enable protocol tracing")
+    parser.add_option("-f","--forever", action="store_true",
+                      help="don't stop receiving")
     parser.add_option("--ca",
                       help="Certificate Authority PEM file")
     parser.add_option("--ssl-cert-file",
@@ -152,17 +154,27 @@ def main(argv=None):
     receiver.add_capacity(1)
     receiver.open()
 
-    # Poll connection until something arrives
-    while not cb.done and not connection.closed:
-        process_connection(connection, my_socket)
 
-    if cb.done:
-        print("Receive done, message=%s" % str(cb.message) if cb.message
-              else "ERROR: no message received")
-        if cb.handle:
-            receiver.message_accepted(cb.handle)
-    else:
-        print("Receive failed due to connection failure!")
+    while True:
+
+        # Poll connection until something arrives
+        while not cb.done and not connection.closed:
+            process_connection(connection, my_socket)
+
+        if cb.done:
+            print("Receive done, message=%s" % str(cb.message) if cb.message
+                  else "ERROR: no message received")
+            if cb.handle:
+                receiver.message_accepted(cb.handle)
+        else:
+            print("Receive failed due to connection failure!")
+            break
+
+        if not opts.forever:
+            break
+
+        cb.done = False
+        receiver.add_capacity(1)
 
     # flush any remaining output before closing (optional)
     while connection.has_output > 0:

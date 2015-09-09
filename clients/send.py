@@ -76,6 +76,8 @@ def main(argv=None):
                       help="Address for link target.")
     parser.add_option("--trace", dest="trace", action="store_true",
                       help="enable protocol tracing")
+    parser.add_option("-f", "--forever", action="store_true",
+                      help="Keep sending forever")
     parser.add_option("--ca",
                       help="Certificate Authority PEM file")
     parser.add_option("--ssl-cert-file",
@@ -118,9 +120,6 @@ def main(argv=None):
         conn_properties["x-ssl-identity"] = (opts.ssl_cert_file,
                                              opts.ssl_key_file,
                                              opts.ssl_key_password)
-        #conn_properties["x-ssl-identity"] = ("/home/kgiusti/DISPATCH/SSL/test_cert_dir/router-client-certificate.pem",
-        #"/home/kgiusti/DISPATCH/SSL/test_cert_dir/router-client-private-key.pem",
-        #"password")
     if opts.idle_timeout:
         conn_properties["idle-time-out"] = opts.idle_timeout
     if opts.username:
@@ -130,10 +129,8 @@ def main(argv=None):
     if opts.sasl_mechs:
         conn_properties['x-sasl-mechs'] = opts.sasl_mechs
     if opts.sasl_config_dir:
-        #conn_properties["x-sasl-config-dir"] = "/home/kgiusti/DISPATCH/qpidd/sasl2"
         conn_properties["x-sasl-config-dir"] = opts.sasl_config_dir
     if opts.sasl_config_name:
-        #conn_properties["x-sasl-config-name"] = "qpidd"
         conn_properties["x-sasl-config-name"] = opts.sasl_config_name
 
     c_handler = ConnectionEventHandler()
@@ -149,10 +146,6 @@ def main(argv=None):
                                       s_handler)
     sender.open()
 
-    # Send a single message:
-    msg = Message()
-    msg.body = str(payload)
-
     class SendCallback(object):
         def __init__(self):
             self.done = False
@@ -162,18 +155,28 @@ def main(argv=None):
             self.done = True
             self.status = status
 
-    cb = SendCallback()
-    sender.send(msg, cb)
+    while True:
 
-    # Poll connection until SendCallback is invoked:
-    while not cb.done and not connection.closed:
-        process_connection(connection, my_socket)
+        # Send a single message:
+        msg = Message()
+        msg.body = str(payload)
 
-    if cb.done:
-        print("Send done, status=%s" % SEND_STATUS.get(cb.status,
+        cb = SendCallback()
+        sender.send(msg, cb)
+
+        # Poll connection until SendCallback is invoked:
+        while not cb.done and not connection.closed:
+            process_connection(connection, my_socket)
+
+        if cb.done:
+            print("Send done, status=%s" % SEND_STATUS.get(cb.status,
                                                        "???"))
-    else:
-        print("Send failed due to connection failure!")
+        else:
+            print("Send failed due to connection failure!")
+            break
+
+        if not opts.forever:
+            break
 
     # flush any remaining output before closing (optional)
     while connection.has_output > 0:

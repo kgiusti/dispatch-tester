@@ -1,4 +1,4 @@
-0) search and replace the "/home/kgiusti/DISPATCH" text in each of the configuration files.
+0) search and replace the "/home/kgiusti/work/dispatch-tester" text in each of the configuration files.
    Replace this with the path to your installed dispatch test directory.
 1) download the version of dispatch you want to test.  
 2) Install qpidd and proton packages
@@ -9,18 +9,18 @@
 6) Create SSL certificates by running the make_certs.sh script in the SSL subdirectory
 
 7) Run qpidd using the configuration in the qpidd subdir:
-$ qpidd --config /home/kgiusti/DISPATCH/qpidd/qpidd.conf   --log-enable trace+:Security --log-enable trace+:Protocol 
+$ qpidd --config /home/kgiusti/work/dispatch-tester/qpidd/qpidd.conf   --log-enable trace+:Security --log-enable trace+:Protocol 
 
 8) Add a queue to the broker with the prefix "Broker.":
-$ qpid-config add queue "Broker.KEN" -b amqps://127.0.0.1 --ssl-certificate ~/DISPATCH/SSL/test_cert_dir/router-client-certificate.pem --ssl-key ~/DISPATCH/SSL/test_cert_dir/router-client-private-key.pem 
+$ qpid-config add queue "Broker.KEN" -b amqps://127.0.0.1 --ssl-certificate ~/work/dispatch-tester/SSL/test_cert_dir/router-client-certificate.pem --ssl-key ~/work/dispatch-tester/SSL/test_cert_dir/router-client-private-key.pem 
 
 
 9) Fire up two routers (RouterA and RouterB)
-$ qdrouterd -c ~/DISPATCH/RouterA/etc/qpid-dispatch/qdrouter.conf
-$ qdrouterd -c ~/DISPATCH/RouterB/etc/qpid-dispatch/qdrouter.conf
+$ qdrouterd -c ~/work/dispatch-tester/RouterA/etc/qpid-dispatch/qdrouterd.conf -I ~/work/dispatch-tester/qpid-dispatch-0.5/python
+$ qdrouterd -c ~/work/dispatch-tester/RouterB/etc/qpid-dispatch/qdrouterd.conf -I ~/work/dispatch-tester/qpid-dispatch-0.5/python
 
 10) Check RouterA or RouterB using qdstat:
-$ qdstat -n -b 127.0.0.1:7777 --ssl-certificate ~/DISPATCH/SSL/test_cert_dir/router-client-certificate.pem --ssl-key ~/DISPATCH/SSL/test_cert_dir/router-client-private-key.pem --ssl-trustfile ~/DISPATCH/SSL/test_cert_dir/ca_cert.pem 
+$ qdstat -n -b 127.0.0.1:7777 --ssl-certificate ~/work/dispatch-tester/SSL/test_cert_dir/router-client-certificate.pem --ssl-key ~/work/dispatch-tester/SSL/test_cert_dir/router-client-private-key.pem --ssl-trustfile ~/work/dispatch-tester/SSL/test_cert_dir/ca_cert.pem 
 
 11) create a python virtualenv in the clients subdirectory, install pyngus:
 
@@ -29,9 +29,9 @@ $ pip install pyngus
 
 12) Run clients to send a receiver from the broker's queue:
 
-$ ./send.py --ca ~/DISPATCH/SSL/test_cert_dir/ca_cert.pem --ssl-cert-file ~/DISPATCH/SSL/test_cert_dir/router-client-certificate.pem --ssl-key-file ~/DISPATCH/SSL/test_cert_dir/router-client-private-key.pem --ssl-key-password password --sasl-config-dir ~/DISPATCH/qpidd/sasl2 --sasl-config-name qpidd -a amqp://127.0.0.1:8888 --target "Broker.KEN" "A Message" 
+$ ./send.py --ca ~/work/dispatch-tester/SSL/test_cert_dir/ca_cert.pem --ssl-cert-file ~/work/dispatch-tester/SSL/test_cert_dir/router-client-certificate.pem --ssl-key-file ~/work/dispatch-tester/SSL/test_cert_dir/router-client-private-key.pem --ssl-key-password password --sasl-config-dir ~/work/dispatch-tester/qpidd/sasl2 --sasl-config-name qpidd -a amqp://127.0.0.1:8888 --target "Broker.KEN" "A Message" 
 
-$ ./recv.py --ca ~/DISPATCH/SSL/test_cert_dir/ca_cert.pem --ssl-cert-file ~/DISPATCH/SSL/test_cert_dir/router-client-certificate.pem --ssl-key-file ~/DISPATCH/SSL/test_cert_dir/router-client-private-key.pem --ssl-key-password password --sasl-config-dir ~/DISPATCH/qpidd/sasl2 --sasl-config-name qpidd -a amqp://127.0.0.1:7777 --source "Broker.KEN"
+$ ./recv.py --ca ~/work/dispatch-tester/SSL/test_cert_dir/ca_cert.pem --ssl-cert-file ~/work/dispatch-tester/SSL/test_cert_dir/router-client-certificate.pem --ssl-key-file ~/work/dispatch-tester/SSL/test_cert_dir/router-client-private-key.pem --ssl-key-password password --sasl-config-dir ~/work/dispatch-tester/qpidd/sasl2 --sasl-config-name qpidd -a amqp://127.0.0.1:7777 --source "Broker.KEN"
 
-$ qpid-stat -q -b amqps://127.0.0.1 --ssl-certificate ~/DISPATCH/SSL/test_cert_dir/router-client-certificate.pem --ssl-key ~/DISPATCH/SSL/test_cert_dir/router-client-private-key.pem 
+$ qpid-stat -q -b amqps://127.0.0.1 --ssl-certificate ~/work/dispatch-tester/SSL/test_cert_dir/router-client-certificate.pem --ssl-key ~/work/dispatch-tester/SSL/test_cert_dir/router-client-private-key.pem 
 
