@@ -50,6 +50,7 @@ class SocketConnection(pyngus.ConnectionEventHandler):
 
         self.sender_links = set()
         self.receiver_links = set()
+        self._error = None
 
     def destroy(self):
         for link in self.sender_links.copy():
@@ -65,7 +66,9 @@ class SocketConnection(pyngus.ConnectionEventHandler):
 
     @property
     def closed(self):
-        return self.connection is None or self.connection.closed
+        return (self._error or
+                self.connection is None or
+                self.connection.closed)
 
     def fileno(self):
         """Allows use of a SocketConnection in a select() call."""
@@ -76,7 +79,8 @@ class SocketConnection(pyngus.ConnectionEventHandler):
         try:
             pyngus.read_socket_input(self.connection, self.socket)
         except Exception as e:
-            LOG.error("Exception on socket read: %s", str(e))
+            self._error = "Exception on socket read: %s" % str(e)
+            LOG.error(self._error)
             self.connection.close_input()
             self.connection.close()
         self.connection.process(time.time())
@@ -87,7 +91,8 @@ class SocketConnection(pyngus.ConnectionEventHandler):
             pyngus.write_socket_output(self.connection,
                                        self.socket)
         except Exception as e:
-            LOG.error("Exception on socket write: %s", str(e))
+            self._error = "Exception on socket write: %s" % str(e)
+            LOG.error(self._error)
             self.connection.close_output()
             self.connection.close()
         self.connection.process(time.time())
@@ -104,8 +109,9 @@ class SocketConnection(pyngus.ConnectionEventHandler):
         LOG.debug("Connection: closed.")
 
     def connection_failed(self, connection, error):
-        LOG.error("Connection: failed! error=%s", str(error))
-        self.connection.close()
+        if not self._error:
+            self._error = "Connection: failed! error=%s" % str(error)
+            LOG.error(self._error)
 
     def sender_requested(self, connection, link_handle,
                          name, requested_source, properties):
@@ -240,17 +246,20 @@ def main(argv=None):
                       default="amqp://0.0.0.0:5672",
                       help="Server address [amqp://0.0.0.0:5672]")
     parser.add_option("--idle", dest="idle_timeout", type="float",
+                      default=30,
                       help="timeout for an idle link, in seconds")
     parser.add_option("--trace", dest="trace", action="store_true",
                       help="enable protocol tracing")
     parser.add_option("--debug", dest="debug", action="store_true",
                       help="enable debug logging")
-    parser.add_option("--cert",
+    parser.add_option("--ssl-cert-file",
                       help="PEM File containing the server's certificate")
-    parser.add_option("--key",
+    parser.add_option("--ssl-key-file",
                       help="PEM File containing the server's private key")
-    parser.add_option("--keypass",
+    parser.add_option("--ssl-key-password",
                       help="Password used to decrypt key file")
+    parser.add_option("--ca",
+                      help="Certificate Authority PEM file")
     parser.add_option("--require-auth", action="store_true",
                       help="Require clients to authenticate")
     parser.add_option("--sasl-mechs", type="string",
@@ -316,10 +325,15 @@ def main(argv=None):
                     conn_properties["idle-time-out"] = opts.idle_timeout
                 if opts.trace:
                     conn_properties["x-trace-protocol"] = True
-                if opts.cert:
+                if opts.ca:
                     conn_properties["x-ssl-server"] = True
-                    identity = (opts.cert, opts.key, opts.keypass)
+                    conn_properties["x-ssl-ca-file"] = opts.ca
+                    conn_properties["x-ssl-verify-mode"] = "verify-cert"
+                if opts.ssl_cert_file:
+                    conn_properties["x-ssl-server"] = True
+                    identity = (opts.ssl_cert_file, opts.ssl_key_file, opts.ssl_key_password)
                     conn_properties["x-ssl-identity"] = identity
+
                 sconn = SocketConnection(container,
                                          client_socket,
                                          name,

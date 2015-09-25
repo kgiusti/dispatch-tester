@@ -36,10 +36,14 @@ LOG.addHandler(logging.StreamHandler())
 
 
 class ConnectionEventHandler(pyngus.ConnectionEventHandler):
+    def __init__(self):
+        super(ConnectionEventHandler, self).__init__()
+        self.error = None
+
     def connection_failed(self, connection, error):
         """Connection's transport has failed in some way."""
         LOG.warn("Connection failed: %s", error)
-        connection.close()
+        self.error = error or "Unknown error!"
 
     def connection_remote_closed(self, connection, pn_condition):
         """Peer has closed its end of the connection."""
@@ -165,28 +169,31 @@ def main(argv=None):
         sender.send(msg, cb)
 
         # Poll connection until SendCallback is invoked:
-        while not cb.done and not connection.closed:
+        while not cb.done:
             process_connection(connection, my_socket)
+            if c_handler.error:
+                break
+            if connection.closed:
+                break
 
         if cb.done:
             print("Send done, status=%s" % SEND_STATUS.get(cb.status,
                                                        "???"))
         else:
-            print("Send failed due to connection failure!")
+            print("Send failed due to connection failure: %s" %
+                  c_handler.error or "remote closed unexpectedly")
             break
 
         if not opts.forever:
             break
 
-    # flush any remaining output before closing (optional)
-    while connection.has_output > 0:
-        process_connection(connection, my_socket)
-
-    sender.close()
-    connection.close()
+    if not sender.closed:
+        sender.close()
+    if not connection.closed:
+        connection.close()
 
     # Poll connection until close completes:
-    while not connection.closed:
+    while not c_handler.error and not connection.closed:
         process_connection(connection, my_socket)
 
     sender.destroy()

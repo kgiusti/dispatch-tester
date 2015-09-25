@@ -34,10 +34,14 @@ LOG.addHandler(logging.StreamHandler())
 
 
 class ConnectionEventHandler(pyngus.ConnectionEventHandler):
+    def __init__(self):
+        super(ConnectionEventHandler, self).__init__()
+        self.error = None
+
     def connection_failed(self, connection, error):
         """Connection has failed in some way."""
-        LOG.warn("Connection failed: %s", error)
-        connection.close()
+        LOG.warn("Connection failed callback: %s", error)
+        self.error = error or "Unknown error!"
 
     def connection_remote_closed(self, connection, pn_condition):
         """Peer has closed its end of the connection."""
@@ -140,7 +144,7 @@ def main(argv=None):
     if opts.sasl_config_name:
         conn_properties["x-sasl-config-name"] = opts.sasl_config_name
 
-    c_handler = pyngus.ConnectionEventHandler()
+    c_handler = ConnectionEventHandler()
     connection = container.create_connection("receiver",
                                              c_handler,
                                              conn_properties)
@@ -158,8 +162,12 @@ def main(argv=None):
     while True:
 
         # Poll connection until something arrives
-        while not cb.done and not connection.closed:
+        while not cb.done:
             process_connection(connection, my_socket)
+            if c_handler.error:
+                break
+            if connection.closed:
+                break
 
         if cb.done:
             print("Receive done, message=%s" % str(cb.message) if cb.message
@@ -167,7 +175,8 @@ def main(argv=None):
             if cb.handle:
                 receiver.message_accepted(cb.handle)
         else:
-            print("Receive failed due to connection failure!")
+            print("Receive failed due to connection failure: %s" %
+                  c_handler.error or "remote closed unexpectedly")
             break
 
         if not opts.forever:
@@ -176,15 +185,8 @@ def main(argv=None):
         cb.done = False
         receiver.add_capacity(1)
 
-    # flush any remaining output before closing (optional)
-    while connection.has_output > 0:
-        process_connection(connection, my_socket)
-
-    receiver.close()
-    connection.close()
-
     # Poll connection until close completes:
-    while not connection.closed:
+    while not c_handler.error and not connection.closed:
         process_connection(connection, my_socket)
 
     receiver.destroy()
