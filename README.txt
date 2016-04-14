@@ -20,3 +20,4 @@ Creates a small dispatch network:
 
 See HOWTO.txt for commands used to run the tests
 
+See the examples directory for various configurations.
