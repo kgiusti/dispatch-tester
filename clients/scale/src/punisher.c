@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 
 
 #include "proton/reactor.h"
@@ -33,8 +34,6 @@
 #include "proton/event.h"
 #include "proton/handlers.h"
 
-static int quiet = 0;
-
 // Example application data.  This data will be instantiated in the event
 // handler, and is available during event processing.  In this example it
 // holds configuration and state information.
@@ -42,8 +41,8 @@ static int quiet = 0;
 typedef struct {
     int count;          // # messages to send
     int anon;           // use anonymous link if true
-    int unsettled;      // send all unsettled
-    int acked;          // exit after N acks
+    int presettle;      // send all pre settled
+    int sent;           // # messages sent
     char *target;       // name of destination target
     char *msg_data;     // pre-encoded outbound message
     int msg_len;        // bytes in msg_data
@@ -82,8 +81,7 @@ static void event_handler(pn_handler_t *handler,
         pn_session_t *ssn = pn_session(conn);
         pn_session_open(ssn);
         pn_link_t *sender = pn_sender(ssn, "MySender");
-        // we do not wait for ack until the last message
-        pn_link_set_snd_settle_mode(sender, PN_SND_MIXED);
+        pn_link_set_snd_settle_mode(sender, (data->presettle) ? PN_SND_SETTLED : PN_SND_UNSETTLED);
         if (!data->anon) {
             pn_terminus_set_address(pn_link_target(sender), data->target);
         }
@@ -96,34 +94,23 @@ static void event_handler(pn_handler_t *handler,
         static long tag = 0;  // a simple tag generator
         pn_link_t *sender = pn_event_link(event);
         int credit = pn_link_credit(sender);
-        while (credit > 0 && data->count > 0) {
+        while (credit > 0 && (data->count == 0 ||
+                              data->sent < data->count)) {
             --credit;
-            --data->count;
+            ++data->sent;
             ++tag;
             pn_delivery_t *delivery;
             delivery = pn_delivery(sender,
                                    pn_dtag((const char *)&tag, sizeof(tag)));
-            sleep(1);
             pn_link_send(sender, data->msg_data, data->msg_len);
             pn_link_advance(sender);
-            if (data->unsettled) {
-                // leave all messages unsettled
-            } else if (data->count > 0) {
-                // send pre-settled until the last one, then wait for an ack on
-                // the last sent message. This allows the sender to send
-                // messages as fast as possible and then exit when the consumer
-                // has dealt with the last one.
-                //
+            if (data->presettle) {
                 pn_delivery_settle(delivery);
             }
         }
     } break;
 
     case PN_DELIVERY: {
-        // Since the example sends all messages but the last pre-settled
-        // (pre-acked), only the last message's delivery will get updated with
-        // the remote state (acked/nacked).
-        //
         pn_delivery_t *dlv = pn_event_delivery(event);
         if (pn_delivery_updated(dlv) && pn_delivery_remote_state(dlv)) {
             uint64_t rs = pn_delivery_remote_state(dlv);
@@ -133,26 +120,20 @@ static void event_handler(pn_handler_t *handler,
                 // peer is still processing the message.
                 break;
             case PN_ACCEPTED:
-                --data->acked;
                 pn_delivery_settle(dlv);
-                if (!quiet) fprintf(stdout, "Send complete!\n");
                 break;
             case PN_REJECTED:
             case PN_RELEASED:
             case PN_MODIFIED:
-                --data->acked;
                 pn_delivery_settle(dlv);
-                fprintf(stderr, "Message not accepted - code:%lu\n", (unsigned long)rs);
+                fprintf(stderr, "Message not accepted - code:0x%lX\n", (unsigned long)rs);
                 break;
             default:
-                // ??? no other terminal states defined, so ignore anything else
-                --data->acked;
-                pn_delivery_settle(dlv);
-                fprintf(stderr, "Unknown delivery failure - code=%lu\n", (unsigned long)rs);
+                fprintf(stderr, "Unknown delivery failure - code=0x%lX\n", (unsigned long)rs);
                 break;
             }
 
-            if (data->acked == 0) {
+            if (data->count == data->sent) {
                 // initiate clean shutdown of the endpoints
                 pn_link_t *link = pn_delivery_link(dlv);
                 pn_link_close(link);
@@ -170,25 +151,25 @@ static void event_handler(pn_handler_t *handler,
 
 static void usage(void)
 {
-  printf("Usage: send <options> <message>\n");
+  printf("Usage: punisher <options> <message>\n");
   printf("-a      \tThe host address [localhost:5672]\n");
-  printf("-c      \t# of messages to send [1]\n");
+  printf("-c      \t# of messages to send, 0=forever [1] \n");
   printf("-t      \tTarget address [examples]\n");
-  printf("-n      \tUse an anonymous link [off]\n");
   printf("-i      \tContainer name [SendExample]\n");
-  printf("-q      \tQuiet - turn off stdout\n");
-  printf("-u      \tSend all messages unsettled\n");
+  printf("-u      \tSend all messages pre-settled [off]\n");
+  printf("-n      \tUse anonymous link [off]\n");
   printf("message \tA text string to send.\n");
   exit(1);
 }
 
 int main(int argc, char** argv)
 {
-    char *address = "localhost";
+    char *address = "localhost:5672";
     char *msgtext = "Hello World!";
     char *container = "SendExample";
-    int anon = 0;
     int c;
+    struct timespec start;
+    struct timespec end;
 
     /* Create a handler for the connection's events.  event_handler() will be
      * called for each event and delete_handler will be called when the
@@ -203,7 +184,6 @@ int main(int argc, char** argv)
     app_data_t *app_data = GET_APP_DATA(handler);
     memset(app_data, 0, sizeof(app_data_t));
     app_data->count = 1;
-    app_data->acked = 1;
     app_data->target = "examples";
 
     /* Attach the pn_handshaker() handler.  This handler deals with endpoint
@@ -213,28 +193,26 @@ int main(int argc, char** argv)
 
     /* command line options */
     opterr = 0;
-    while((c = getopt(argc, argv, "i:a:c:t:nhqu")) != -1) {
+    while((c = getopt(argc, argv, "i:a:c:t:nhu")) != -1) {
         switch(c) {
-        case 'h': usage(); break;
+        case 'h':
+            printf("%s: inflict an unreasonably high message load\n", argv[0]);
+            usage();
+            break;
         case 'a': address = optarg; break;
         case 'c':
             app_data->count = atoi(optarg);
-            if (app_data->count < 1) usage();
+            if (app_data->count < 0) usage();
             break;
         case 't': app_data->target = optarg; break;
         case 'n': app_data->anon = 1; break;
         case 'i': container = optarg; break;
-        case 'q': quiet = 1; break;
-        case 'u': app_data->unsettled = 1; break;
+        case 'u': app_data->presettle = 1; break;
         default:
             usage();
             break;
         }
     }
-    if (app_data->unsettled)
-        // wait for all msgs to be acked
-        app_data->acked = app_data->count;
-
     if (optind < argc) msgtext = argv[optind];
 
 
@@ -279,21 +257,23 @@ int main(int argc, char** argv)
     pn_connection_set_container(conn, container);
     pn_connection_set_hostname(conn, address);  // FIXME
 
-    // wait up to 5 seconds for activity before returning from
-    // pn_reactor_process()
-    pn_reactor_set_timeout(reactor, 5000);
-
+    pn_reactor_set_timeout(reactor, 1000);
     pn_reactor_start(reactor);
+    clock_gettime(CLOCK_REALTIME, &start);
 
     while (pn_reactor_process(reactor)) {
-        /* Returns 'true' until the connection is shut down.
-         * pn_reactor_process() will return true at least once every 5 seconds
-         * (due to the timeout).  If no timeout was configured,
-         * pn_reactor_process() returns as soon as it finishes processing all
-         * pending I/O and events. Once the connection has closed,
-         * pn_reactor_process() will return false.
-         */
+        /* Returns 'true' until the connection is shut down */
+        if (app_data->presettle && app_data->sent == app_data->count) {
+            // sent everything pre-settled and no disposition updates expected,
+            // so close the connection
+            pn_connection_close(conn);
+        }
     }
+    clock_gettime(CLOCK_REALTIME, &end);
 
+    long diff = end.tv_sec - start.tv_sec;
+    printf("Thruput %ld (%d messages in %ld seconds)\n",
+           (diff > 0) ? app_data->count / diff : app_data->count,
+           app_data->count, diff);
     return 0;
 }

@@ -35,8 +35,6 @@
 
 static int quiet = 0;
 
-// Credit batch if unlimited receive (-c 0)
-static const int CAPACITY = 100;
 #define MAX_SIZE 512
 
 // Example application data.  This data will be instantiated in the event
@@ -45,6 +43,7 @@ static const int CAPACITY = 100;
 //
 typedef struct {
     int count;          // # of messages to receive before exiting
+    int credit;         // max credit window
     char *source;       // name of the source node to receive from
     pn_message_t *message;      // holds the received message
 } app_data_t;
@@ -86,7 +85,7 @@ static void event_handler(pn_handler_t *handler,
         pn_terminus_set_address(pn_link_source(receiver), data->source);
         pn_link_open(receiver);
         // cannot receive without granting credit:
-        pn_link_flow(receiver, data->count ? data->count : CAPACITY);
+        pn_link_flow(receiver, data->credit);
     } break;
 
     case PN_DELIVERY: {
@@ -132,13 +131,12 @@ static void event_handler(pn_handler_t *handler,
             pn_link_advance(link);
             pn_delivery_settle(dlv);  // dlv is now freed
 
-            if (data->count == 0) {
-                // send forever - see if more credit is needed
-                if (pn_link_credit(link) < CAPACITY/2) {
-                    // Grant enough credit to bring it up to CAPACITY:
-                    pn_link_flow(link, CAPACITY - pn_link_credit(link));
-                }
-            } else if (--data->count == 0) {
+            if (pn_link_credit(link) < data->credit/2) {
+                // Grant enough credit to bring it up to CAPACITY:
+                pn_link_flow(link, data->credit - pn_link_credit(link));
+            }
+
+            if (data->count && --data->count == 0) {
                 // done receiving, close the endpoints
                 pn_link_close(link);
                 pn_session_t *ssn = pn_link_session(link);
@@ -161,6 +159,7 @@ static void usage(void)
   printf("-s      \tSource address [examples]\n");
   printf("-i      \tContainer name [ReceiveExample]\n");
   printf("-q      \tQuiet - turn off stdout\n");
+  printf("-f      \tCredit window [100]\n");
   exit(1);
 }
 
@@ -184,6 +183,7 @@ int main(int argc, char** argv)
     app_data->count = 1;
     app_data->source = "examples";
     app_data->message = pn_message();
+    app_data->credit = 100;
 
     /* Attach the pn_handshaker() handler.  This handler deals with endpoint
      * events from the peer so we don't have to.
@@ -193,7 +193,7 @@ int main(int argc, char** argv)
     /* command line options */
     opterr = 0;
     int c;
-    while((c = getopt(argc, argv, "i:a:c:s:qh")) != -1) {
+    while((c = getopt(argc, argv, "i:a:c:s:qhf:")) != -1) {
         switch(c) {
         case 'h': usage(); break;
         case 'a': address = optarg; break;
@@ -204,6 +204,10 @@ int main(int argc, char** argv)
         case 's': app_data->source = optarg; break;
         case 'i': container = optarg; break;
         case 'q': quiet = 1; break;
+        case 'f':
+            app_data->credit = atoi(optarg);
+            if (app_data->credit <= 0) usage();
+            break;
         default:
             usage();
             break;

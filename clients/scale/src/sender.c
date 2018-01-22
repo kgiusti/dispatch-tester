@@ -186,7 +186,6 @@ int main(int argc, char** argv)
     char *address = "localhost";
     char *msgtext = "Hello World!";
     char *container = "SendExample";
-    int anon = 0;
     int c;
 
     /* Create a handler for the connection's events.  event_handler() will be
