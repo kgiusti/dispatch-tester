@@ -1,7 +1,39 @@
+Oslo.Messaging 2 router smoke test
+----------------------------------
 
-Example:
+This test instantiates two dispatch routers in containers and runs a
+long progression of Oslo.Messaging RPC and Notification message
+transfers across them.
 
- $ docker build --tag kgiusti/router1:1 --file Dockerfile-router1 --build-arg proton_branch=0.20.0 --build-arg dispatch_branch=1.0.1 .
- $ docker build --tag kgiusti/router2:1 --file Dockerfile-router2 --build-arg proton_branch=0.20.0 --build-arg dispatch_branch=1.0.1 .
- $ docker run -d --name Router1-2router --net=host kgiusti/router1:1
- $ docker run -d --name Router2-2router --net=host kgiusti/router2:1 
+To run the tests:
+
+0) source ./set-up.sh - this will build and deploy two routers.  You
+can control the URL and the branch/tag/SHA1 used to check out dispatch
+and the proton sources - see set-up.sh for details.
+
+1) Once the routers have come up, create a python virtual environment
+using virtualenv.  Activate the environment, and install pyngus,
+oslo.messaging, and ombt packages.  Example:
+
+$ virtualenv venv
+$ source ./venv/bin/activate
+$ pip install pyngus oslo.messaging ombt
+
+2) run the smoke test script found in the tests directory (from within
+the python virtual environment of course).  Example:
+
+(venv) $ source ./tests/test_smoke_01.sh
+
+You can run qdstat commands against the routers by specifying the '-b'
+option with the proper port number (see the router*-qdrouterd.conf
+files).  Example:
+
+$ qdstat -b localhost:15672 -m
+
+3) Source the clean-up.sh script to destroy the router containers when
+finished.
+
+
+Note: the set-up.sh and clean-up.sh scripts run docker via the 'sudo'
+command.  You'll need the necessary permissions to be able to run
+'sudo'.
