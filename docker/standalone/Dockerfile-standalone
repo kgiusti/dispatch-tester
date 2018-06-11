@@ -24,7 +24,7 @@
 #   sudo docker run -i -t <username>/dispatch
 
 # Gets the latest Fedora from dockerhub
-FROM fedora:latest
+FROM fedora:27
 
 LABEL maintainer=kgiusti@gmail.com
 
@@ -36,6 +36,7 @@ LABEL maintainer=kgiusti@gmail.com
 
 RUN dnf -y install \
     gcc \
+    gcc-c++ \
     cmake \
     openssl-devel \
     cyrus-sasl-devel \
@@ -85,8 +86,9 @@ RUN wget https://github.com/apache/qpid-dispatch/archive/${dispatch_branch}.tar.
 
 # move the configuration file in place
 #
-##COPY qdrouterd.conf /etc/qpid-dispatch
+COPY qdrouterd.conf /etc/qpid-dispatch/qdrouterd.conf
 
 # Start the dispatch router
-##CMD ["qdrouterd"]
-CMD ["/bin/bash"]
+#
+CMD ["qdrouterd"]
+

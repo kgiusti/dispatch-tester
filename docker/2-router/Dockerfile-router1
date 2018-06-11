@@ -65,7 +65,7 @@ ENV dispatch_url ${dispatch_url:-https://github.com/apache/qpid-dispatch/archive
 #
 WORKDIR /main
 
-# build and install proton from ${proton_branch} on github
+# build and install proton from ${proton_branch} on ${proton_url}
 #
 RUN wget ${proton_url}/${proton_branch}.tar.gz \
     && tar -xvzf ${proton_branch}.tar.gz \
@@ -77,7 +77,7 @@ RUN wget ${proton_url}/${proton_branch}.tar.gz \
     && cd /main \
     && rm -rf ${proton_branch}.tar.gz qpid-proton-${proton_branch}
 
-# build and install dispatch from ${dispatch_branch} on github
+# build and install dispatch from ${dispatch_branch} on ${dispatch_url}
 #
 RUN wget ${dispatch_url}/${dispatch_branch}.tar.gz \
     && tar -xvzf ${dispatch_branch}.tar.gz \
