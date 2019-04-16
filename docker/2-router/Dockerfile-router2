@@ -24,7 +24,7 @@
 #   sudo docker run -i -t <username>/dispatch
 
 # Gets the latest Fedora from dockerhub
-FROM fedora:27
+FROM fedora:29
 
 LABEL maintainer=kgiusti@gmail.com
 

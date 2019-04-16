@@ -30,9 +30,14 @@ files).  Example:
 
 $ qdstat -b localhost:15672 -m
 
+Or exec directly into a container and query over the mesh:
+
+$ docker exec -it  Router1-2router /bin/bash
+# qdstat -b 127.0.0.1:15672 -m
+# qdstat -b 127.0.0.1:15672 -r Router.2 -m
+
 3) Source the clean-up.sh script to destroy the router containers when
 finished.
-
 
 Note: the set-up.sh and clean-up.sh scripts run docker via the 'sudo'
 command.  You'll need the necessary permissions to be able to run
