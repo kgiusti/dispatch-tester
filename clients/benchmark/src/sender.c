@@ -75,6 +75,7 @@ pn_link_t *pn_link;
 pn_reactor_t *reactor;
 pn_message_t *out_message;
 
+pn_timestamp_t start_ts;
 
 // return wallclock time in msecs since Epoch
 //
@@ -197,6 +198,7 @@ static void event_handler(pn_handler_t *handler,
         static long tag = 0;  // a simple tag generator
         pn_link_t *sender = pn_event_link(event);
         int credit = pn_link_credit(sender);
+        if (credit && !start_ts) start_ts = now_ms();
         while (credit > 0 && (limit == 0 || count < limit)) {
             --credit;
             ++count;
@@ -269,7 +271,7 @@ static void usage(void)
   printf("-s      \tBody size in bytes ('s'=%d 'm'=%d 'l'=%d) [%d]\n",
          BODY_SIZE_SMALL, BODY_SIZE_MEDIUM, BODY_SIZE_LARGE, body_size);
   printf("-t      \tTarget address [%s]\n", target_address);
-  printf("-u      \tSend all messages unsettled [%s]\n", BOOL2STR(presettle));
+  printf("-u      \tSend all messages presettled [%s]\n", BOOL2STR(presettle));
   exit(1);
 }
 
@@ -306,9 +308,6 @@ int main(int argc, char** argv)
         }
     }
 
-    if (add_timestamp)
-        presettle = true;
-
     signal(SIGQUIT, signal_handler);
     signal(SIGINT,  signal_handler);
 
@@ -330,6 +329,14 @@ int main(int argc, char** argv)
 
     while (pn_reactor_process(reactor)) {
         if (stop) {
+            if (count) {
+                pn_timestamp_t now = now_ms();
+                double duration = (double)(now - start_ts) / 1000.0;
+                if (duration == 0.0) duration = 0.0010;  // zero divide hack
+                printf("  %.4f: msgs sent=%"PRIu64" msgs/sec=%12.4f\n",
+                       duration, count, (double)count/duration);
+            }
+
             // close the endpoints this will cause pn_reactor_process() to
             // eventually break the loop
             if (pn_link) pn_link_close(pn_link);
