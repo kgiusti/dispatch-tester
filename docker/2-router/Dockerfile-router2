@@ -24,7 +24,7 @@
 #   sudo docker run -i -t <username>/dispatch
 
 # Gets the latest Fedora from dockerhub
-FROM fedora:29
+FROM fedora:latest
 
 LABEL maintainer=kgiusti@gmail.com
 
@@ -50,6 +50,7 @@ RUN dnf -y install \
     libuv-devel \
     libwebsockets-devel \
     wget \
+    procps-ng \
     && dnf clean all -y
 
 ARG proton_branch
