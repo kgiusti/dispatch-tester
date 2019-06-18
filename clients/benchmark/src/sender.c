@@ -26,6 +26,7 @@
 #include <time.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <math.h>
 
 
 #include "proton/reactor.h"
@@ -41,7 +42,7 @@
 
 #define BODY_SIZE_SMALL  100
 #define BODY_SIZE_MEDIUM 2000
-#define BODY_SIZE_LARGE  60000
+#define BODY_SIZE_LARGE  60000  // NOTE: receiver.c max in buffer size = 64KB
 
 char _payload[BODY_SIZE_LARGE] = {0};
 pn_bytes_t body_data = {
@@ -75,11 +76,11 @@ pn_link_t *pn_link;
 pn_reactor_t *reactor;
 pn_message_t *out_message;
 
-pn_timestamp_t start_ts;
+int64_t start_ts;
 
-// return wallclock time in msecs since Epoch
+// return wallclock time in microseconds since Epoch
 //
-static pn_timestamp_t now_ms(void)
+static int64_t now_usec(void)
 {
     struct timespec ts;
     int rc = clock_gettime(CLOCK_REALTIME, &ts);
@@ -88,11 +89,27 @@ static pn_timestamp_t now_ms(void)
         exit(errno);
     }
 
-    return (pn_timestamp_t)((1000 * ts.tv_sec) + (ts.tv_nsec / 1000000));
+    return (1000000 * (int64_t)ts.tv_sec) + (ts.tv_nsec / 1000);
+}
+
+static void now_timespec(struct timespec *ts)
+{
+    int rc = clock_gettime(CLOCK_MONOTONIC, ts);
+    if (rc) {
+        perror("clock_gettime failed");
+        exit(errno);
+    }
+}
+
+static int64_t diff_timespec_usec(const struct timespec *start,
+                                  const struct timespec *end)
+{
+    return (end->tv_sec - start->tv_sec) * 1000000
+        + ((((end->tv_nsec - start->tv_nsec)) + 500) / 1000);
 }
 
 
-void generate_message(void)
+void generate_message(int64_t now_usec)
 {
     if (!out_message) {
         out_message = pn_message();
@@ -105,16 +122,16 @@ void generate_message(void)
     pn_data_put_list(body);
     pn_data_enter(body);
 
-    // block of 0s - body_size bytes
-    body_data.size = body_size;
+    pn_data_put_long(body, now_usec);
+
+    // block of 0s - body_size - long size bytes
+    body_data.size = body_size - 8;
     pn_data_put_binary(body, body_data);
 
     pn_data_exit(body);
-}
 
+    // now encode it
 
-void encode_message(void)
-{
     pn_data_rewind(pn_message_body(out_message));
     if (!encode_buffer) {
         encode_buffer_size = body_size + 512;
@@ -166,6 +183,13 @@ static void delete_handler(pn_handler_t *handler)
 }
 
 
+static struct timespec start_stall;
+bool      stalled;
+uint64_t  worse_stall;
+uint64_t  total_stall;
+int       stall_count;
+uint64_t  sum_of_squares;
+
 /* Process each event posted by the reactor.
  */
 static void event_handler(pn_handler_t *handler,
@@ -187,18 +211,29 @@ static void event_handler(pn_handler_t *handler,
         pn_link_open(pn_link);
 
         acked = count;
-        generate_message();
-        encode_message();
+        generate_message(now_usec());
 
     } break;
 
     case PN_LINK_FLOW: {
         // the remote has given us some credit, now we can send messages
         //
+        if (stalled) {
+            struct timespec end;
+            now_timespec(&end);
+            int64_t diff = diff_timespec_usec(&start_stall, &end);
+            if (diff > 0) {
+                stall_count += 1;
+                total_stall += (uint64_t)diff;
+                sum_of_squares += (uint64_t)(diff * diff);
+                if (diff > worse_stall) worse_stall = (uint64_t)diff;
+            }
+            stalled = false;
+        }
         static long tag = 0;  // a simple tag generator
         pn_link_t *sender = pn_event_link(event);
         int credit = pn_link_credit(sender);
-        if (credit && !start_ts) start_ts = now_ms();
+        if (credit && !start_ts) start_ts = now_usec();
         while (credit > 0 && (limit == 0 || count < limit)) {
             --credit;
             ++count;
@@ -207,8 +242,7 @@ static void event_handler(pn_handler_t *handler,
             delivery = pn_delivery(sender,
                                    pn_dtag((const char *)&tag, sizeof(tag)));
             if (add_timestamp) {
-                pn_message_set_creation_time(out_message, now_ms());
-                encode_message();
+                generate_message(now_usec());
             }
 
             pn_link_send(sender, encode_buffer, encoded_data_size);
@@ -222,6 +256,12 @@ static void event_handler(pn_handler_t *handler,
                 }
             }
         }
+
+        if (credit == 0) {
+            stalled = true;
+            now_timespec(&start_stall);
+        }
+
     } break;
 
     case PN_DELIVERY: {
@@ -266,7 +306,7 @@ static void usage(void)
   printf("-a      \tThe host address [%s]\n", host_address);
   printf("-c      \t# of messages to send, 0 == nonstop [%"PRIu64"]\n", limit);
   printf("-i      \tContainer name [%s]\n", container_name);
-  printf("-l      \tAdd timestamp (forces unsettled) [%s]\n", BOOL2STR(add_timestamp));
+  printf("-l      \tAdd timestamp [%s]\n", BOOL2STR(add_timestamp));
   printf("-n      \tUse an anonymous link [%s]\n", BOOL2STR(use_anonymous));
   printf("-s      \tBody size in bytes ('s'=%d 'm'=%d 'l'=%d) [%d]\n",
          BODY_SIZE_SMALL, BODY_SIZE_MEDIUM, BODY_SIZE_LARGE, body_size);
@@ -330,10 +370,10 @@ int main(int argc, char** argv)
     while (pn_reactor_process(reactor)) {
         if (stop) {
             if (count) {
-                pn_timestamp_t now = now_ms();
-                double duration = (double)(now - start_ts) / 1000.0;
+                int64_t now = now_usec();
+                double duration = (double)(now - start_ts) / 1000000.0;
                 if (duration == 0.0) duration = 0.0010;  // zero divide hack
-                printf("  %.4f: msgs sent=%"PRIu64" msgs/sec=%12.4f\n",
+                printf("  %.3f: msgs sent=%"PRIu64" msgs/sec=%12.3f\n",
                        duration, count, (double)count/duration);
             }
 
@@ -343,6 +383,18 @@ int main(int argc, char** argv)
             if (pn_ssn) pn_session_close(pn_ssn);
             pn_connection_close(pn_conn);
         }
+    }
+
+    if (stall_count) {
+        uint64_t imean = total_stall / stall_count;
+        uint64_t isos = sum_of_squares / stall_count;
+        isos = isos - (imean * imean);
+        double std_dev = sqrt((double)isos);
+        printf("\n%d credit stalls occurred\n", stall_count);
+        printf("   Avg stall %.3f msec Max %.3f msec (std dev %.3f msec)\n",
+               (double)imean / 1000.0,
+               (double)worse_stall / 1000.0,
+               (double)std_dev / 1000.0);
     }
 
     return 0;

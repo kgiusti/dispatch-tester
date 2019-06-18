@@ -26,6 +26,7 @@
 #include <time.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <math.h>
 
 #include "proton/reactor.h"
 #include "proton/message.h"
@@ -42,10 +43,12 @@ char in_buffer[MAX_SIZE];
 
 bool stop = false;
 
-pn_timestamp_t min_latency = INT64_MAX;
-pn_timestamp_t max_latency = 0;
-pn_timestamp_t total_latency = 0;
-pn_timestamp_t start_ts;  // start timestamp
+int64_t min_latency = INT64_MAX;
+int64_t max_latency = 0;
+int64_t total_latency = 0;
+int64_t sum_of_squares = 0;
+int64_t start_ts;  // start timestamp
+int latency_count;
 
 int  credit_window = 1000;
 bool check_latency = false;  // check for timestamp (compute latency)
@@ -63,9 +66,9 @@ uint64_t count = 0;
 uint64_t limit = 0;   // if > 0 stop after limit messages arrive
 
 
-// return wallclock time in msecs since Epoch
+// return wallclock time in microseconds since Epoch
 //
-static pn_timestamp_t now_ms(void)
+static int64_t now_usec(void)
 {
     struct timespec ts;
     int rc = clock_gettime(CLOCK_REALTIME, &ts);
@@ -74,7 +77,7 @@ static pn_timestamp_t now_ms(void)
         exit(errno);
     }
 
-    return (pn_timestamp_t)((1000 * ts.tv_sec) + (ts.tv_nsec / 1000000));
+    return (1000000 * (int64_t)ts.tv_sec) + (ts.tv_nsec / 1000);
 }
 
 
@@ -134,21 +137,32 @@ static void event_handler(pn_handler_t *handler,
         pn_delivery_t *dlv = pn_event_delivery(event);
         if (pn_delivery_readable(dlv) && !pn_delivery_partial(dlv)) {
             // A full message has arrived
-            if (!start_ts) start_ts = now_ms();
+            if (!start_ts) start_ts = now_usec();
             count += 1;
             if (check_latency && pn_delivery_pending(dlv) < MAX_SIZE) {
                 // try to decode the message to get at the timestamp
                 size_t len = pn_link_recv(pn_delivery_link(dlv), in_buffer, MAX_SIZE);
-                if (len  > 0) {
+                if (len > 0) {
                     pn_message_clear(in_message);
                     // decode the raw data into the message instance
                     if (pn_message_decode(in_message, in_buffer, len) == PN_OK) {
-                        pn_timestamp_t ts = pn_message_get_creation_time(in_message);
-                        if (ts) {
-                            ts = now_ms() - ts;
-                            if (ts < min_latency) min_latency = ts;
-                            if (ts > max_latency) max_latency = ts;
-                            total_latency += ts;
+                        pn_data_t *body = pn_message_body(in_message);
+                        pn_data_rewind(body);
+                        if (pn_data_next(body)) {
+                            // expect a list, first element long usec transmit timestamp
+                            if (pn_data_get_list(body) >= 2) {
+                                pn_data_enter(body);
+                                pn_data_next(body);
+
+                                if (pn_data_type(body) == PN_LONG) {
+                                    int64_t latency = now_usec() - pn_data_get_long(body);
+                                    if (latency < min_latency) min_latency = latency;
+                                    if (latency > max_latency) max_latency = latency;
+                                    total_latency += latency;
+                                    sum_of_squares += (latency * latency);
+                                    latency_count += 1;
+                                }
+                            }
                         }
                     }
                 }
@@ -236,20 +250,13 @@ int main(int argc, char** argv)
 
     while (pn_reactor_process(reactor)) {
         if (stop) {
-            pn_timestamp_t now = now_ms();
-            double duration = (double)(now - start_ts) / 1000.0;
+            int64_t now = now_usec();
+            double duration = (double)(now - start_ts) / 1000000.0;
             if (duration == 0.0) duration = 0.0010;  // zero divide hack
 
             if (count) {
-                printf("  %.4f: msgs recv=%"PRIu64" msgs/sec=%12.4f",
+                printf("  %.3f: msgs recv=%"PRIu64" msgs/sec=%12.3f\n",
                        duration, count, (double)count/duration);
-
-                if (check_latency) {
-                    printf(" min=%"PRIi64" max=%"PRIi64" avg=%"PRIi64" (msecs)\n",
-                           min_latency, max_latency, total_latency/(int64_t)count);
-                } else {
-                    printf("\n");
-                }
             }
 
             // close the endpoints this will cause pn_reactor_process() to
@@ -258,6 +265,19 @@ int main(int argc, char** argv)
             if (pn_ssn) pn_session_close(pn_ssn);
             pn_connection_close(pn_conn);
         }
+    }
+
+    if (latency_count) {
+        int64_t lmean = total_latency / latency_count;
+        int64_t isos = sum_of_squares / latency_count;
+        isos = isos - (lmean * lmean);
+        double std_dev = sqrt((double)isos);
+        printf("\nLatency:\n");
+        printf("   Avg %.3f msec Max %.3f msec Min %.3f msec (std dev %.3f msec)\n",
+               (double)lmean / 1000.0,
+               (double)max_latency / 1000.0,
+               (double)min_latency / 1000.0,
+               std_dev / 1000.0);
     }
 
     return 0;
