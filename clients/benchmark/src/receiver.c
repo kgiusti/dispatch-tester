@@ -248,15 +248,17 @@ int main(int argc, char** argv)
 
     pn_reactor_start(reactor);
 
+    bool printed = false;
     while (pn_reactor_process(reactor)) {
         if (stop) {
             int64_t now = now_usec();
             double duration = (double)(now - start_ts) / 1000000.0;
             if (duration == 0.0) duration = 0.0010;  // zero divide hack
 
-            if (count) {
+            if (!printed && count) {
                 printf("  %.3f: msgs recv=%"PRIu64" msgs/sec=%12.3f\n",
                        duration, count, (double)count/duration);
+                printed = true;
             }
 
             // close the endpoints this will cause pn_reactor_process() to
