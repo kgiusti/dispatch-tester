@@ -66,6 +66,9 @@ uint64_t count = 0;
 uint64_t limit = 0;   // if > 0 stop after limit messages arrive
 
 
+// microseconds per second
+#define USECS_PER_SECOND 1000000
+
 // return wallclock time in microseconds since Epoch
 //
 static int64_t now_usec(void)
@@ -77,7 +80,7 @@ static int64_t now_usec(void)
         exit(errno);
     }
 
-    return (1000000 * (int64_t)ts.tv_sec) + (ts.tv_nsec / 1000);
+    return (USECS_PER_SECOND * (int64_t)ts.tv_sec) + (ts.tv_nsec / 1000);
 }
 
 
@@ -197,12 +200,14 @@ static void usage(void)
   printf("-l      \tCheck for timestamp [%s]\n", (check_latency) ? "yes" : "no");
   printf("-s      \tSource address [%s]\n", source_address);
   printf("-w      \tCredit window [%d]\n", credit_window);
+  printf("-v      \tPrint periodic status messages [off]\n");
   exit(1);
 }
 
 
 int main(int argc, char** argv)
 {
+    int64_t print_deadline = 0;
 
     /* create a handler for the connection's events.
      */
@@ -212,7 +217,7 @@ int main(int argc, char** argv)
     /* command line options */
     opterr = 0;
     int c;
-    while((c = getopt(argc, argv, "i:a:s:hlw:c:")) != -1) {
+    while((c = getopt(argc, argv, "i:a:s:hlw:c:v")) != -1) {
         switch(c) {
         case 'h': usage(); break;
         case 'a': host_address = optarg; break;
@@ -227,6 +232,8 @@ int main(int argc, char** argv)
             if (sscanf(optarg, "%d", &credit_window) != 1 || credit_window <= 0)
                 usage();
             break;
+        case 'v': print_deadline = now_usec() + (10 * USECS_PER_SECOND); break;
+
         default:
             usage();
             break;
@@ -252,7 +259,7 @@ int main(int argc, char** argv)
     while (pn_reactor_process(reactor)) {
         if (stop) {
             int64_t now = now_usec();
-            double duration = (double)(now - start_ts) / 1000000.0;
+            double duration = (double)(now - start_ts) / (double)USECS_PER_SECOND;
             if (duration == 0.0) duration = 0.0010;  // zero divide hack
 
             if (!printed && count) {
@@ -266,6 +273,9 @@ int main(int argc, char** argv)
             if (pn_link) pn_link_close(pn_link);
             if (pn_ssn) pn_session_close(pn_ssn);
             pn_connection_close(pn_conn);
+        } else if (print_deadline && now_usec() >= print_deadline) {
+            printf("  -> received: %"PRIu64" (accepted) capacity: %d\n", count, pn_link_credit(pn_link));
+            print_deadline = now_usec() + (10 * USECS_PER_SECOND);
         }
     }
 

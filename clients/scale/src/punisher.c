@@ -43,6 +43,7 @@ typedef struct {
     int anon;           // use anonymous link if true
     int presettle;      // send all pre settled
     int sent;           // # messages sent
+    int acked;          // # acks received
     char *target;       // name of destination target
     char *msg_data;     // pre-encoded outbound message
     int msg_len;        // bytes in msg_data
@@ -120,20 +121,23 @@ static void event_handler(pn_handler_t *handler,
                 // peer is still processing the message.
                 break;
             case PN_ACCEPTED:
+                data->acked++;
                 pn_delivery_settle(dlv);
                 break;
             case PN_REJECTED:
             case PN_RELEASED:
             case PN_MODIFIED:
+                data->acked++;
                 pn_delivery_settle(dlv);
                 fprintf(stderr, "Message not accepted - code:0x%lX\n", (unsigned long)rs);
                 break;
             default:
+                data->acked++;
                 fprintf(stderr, "Unknown delivery failure - code=0x%lX\n", (unsigned long)rs);
                 break;
             }
 
-            if (data->count == data->sent) {
+            if (data->count == data->sent && data->acked == data->sent) {
                 // initiate clean shutdown of the endpoints
                 pn_link_t *link = pn_delivery_link(dlv);
                 pn_link_close(link);
@@ -156,7 +160,7 @@ static void usage(void)
   printf("-c      \t# of messages to send, 0=forever [1] \n");
   printf("-t      \tTarget address [examples]\n");
   printf("-i      \tContainer name [SendExample]\n");
-  printf("-u      \tSend all messages pre-settled [off]\n");
+  printf("-p      \tSend all messages pre-settled [off]\n");
   printf("-n      \tUse anonymous link [off]\n");
   printf("message \tA text string to send.\n");
   exit(1);
@@ -193,7 +197,7 @@ int main(int argc, char** argv)
 
     /* command line options */
     opterr = 0;
-    while((c = getopt(argc, argv, "i:a:c:t:nhu")) != -1) {
+    while((c = getopt(argc, argv, "i:a:c:t:nhp")) != -1) {
         switch(c) {
         case 'h':
             printf("%s: inflict an unreasonably high message load\n", argv[0]);
@@ -207,7 +211,7 @@ int main(int argc, char** argv)
         case 't': app_data->target = optarg; break;
         case 'n': app_data->anon = 1; break;
         case 'i': container = optarg; break;
-        case 'u': app_data->presettle = 1; break;
+        case 'p': app_data->presettle = 1; break;
         default:
             usage();
             break;

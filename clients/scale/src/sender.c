@@ -42,7 +42,7 @@ static int quiet = 0;
 typedef struct {
     int count;          // # messages to send
     int anon;           // use anonymous link if true
-    int unsettled;      // send all unsettled
+    int presettled;     // send all messages presettled
     int acked;          // exit after N acks
     char *target;       // name of destination target
     char *msg_data;     // pre-encoded outbound message
@@ -105,9 +105,7 @@ static void event_handler(pn_handler_t *handler,
                                    pn_dtag((const char *)&tag, sizeof(tag)));
             pn_link_send(sender, data->msg_data, data->msg_len);
             pn_link_advance(sender);
-            if (data->unsettled) {
-                // leave all messages unsettled
-            } else if (data->count > 0) {
+            if (data->presettled && data->count > 0) {
                 // send pre-settled until the last one, then wait for an ack on
                 // the last sent message. This allows the sender to send
                 // messages as fast as possible and then exit when the consumer
@@ -176,7 +174,7 @@ static void usage(void)
   printf("-n      \tUse an anonymous link [off]\n");
   printf("-i      \tContainer name [SendExample]\n");
   printf("-q      \tQuiet - turn off stdout\n");
-  printf("-u      \tSend all messages unsettled\n");
+  printf("-p      \tSend all messages presettled [off]\n");
   printf("message \tA text string to send.\n");
   exit(1);
 }
@@ -211,7 +209,7 @@ int main(int argc, char** argv)
 
     /* command line options */
     opterr = 0;
-    while((c = getopt(argc, argv, "i:a:c:t:nhqu")) != -1) {
+    while((c = getopt(argc, argv, "i:a:c:t:nhqp")) != -1) {
         switch(c) {
         case 'h': usage(); break;
         case 'a': address = optarg; break;
@@ -223,13 +221,13 @@ int main(int argc, char** argv)
         case 'n': app_data->anon = 1; break;
         case 'i': container = optarg; break;
         case 'q': quiet = 1; break;
-        case 'u': app_data->unsettled = 1; break;
+        case 'p': app_data->presettled = 1; break;
         default:
             usage();
             break;
         }
     }
-    if (app_data->unsettled)
+    if (!app_data->presettled)
         // wait for all msgs to be acked
         app_data->acked = app_data->count;
 

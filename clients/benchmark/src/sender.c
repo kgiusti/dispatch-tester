@@ -55,6 +55,7 @@ bool stop = false;
 uint64_t limit = 1;               // # messages to send
 uint64_t count = 0;               // # sent
 uint64_t acked = 0;               // # of received acks
+uint64_t accepted = 0;
 
 bool use_anonymous = false;       // use anonymous link if true
 bool presettle = false;           // true = send presettled
@@ -78,6 +79,9 @@ pn_message_t *out_message;
 
 int64_t start_ts;
 
+// microseconds per second
+#define USECS_PER_SECOND 1000000
+
 // return wallclock time in microseconds since Epoch
 //
 static int64_t now_usec(void)
@@ -89,7 +93,7 @@ static int64_t now_usec(void)
         exit(errno);
     }
 
-    return (1000000 * (int64_t)ts.tv_sec) + (ts.tv_nsec / 1000);
+    return (USECS_PER_SECOND * (int64_t)ts.tv_sec) + (ts.tv_nsec / 1000);
 }
 
 static void now_timespec(struct timespec *ts)
@@ -104,7 +108,7 @@ static void now_timespec(struct timespec *ts)
 static int64_t diff_timespec_usec(const struct timespec *start,
                                   const struct timespec *end)
 {
-    return (end->tv_sec - start->tv_sec) * 1000000
+    return (end->tv_sec - start->tv_sec) * USECS_PER_SECOND
         + ((((end->tv_nsec - start->tv_nsec)) + 500) / 1000);
 }
 
@@ -275,6 +279,7 @@ static void event_handler(pn_handler_t *handler,
                 break;
             case PN_ACCEPTED:
                 ++acked;
+                ++accepted;
                 pn_delivery_settle(dlv);
                 break;
             case PN_REJECTED:
@@ -312,15 +317,18 @@ static void usage(void)
          BODY_SIZE_SMALL, BODY_SIZE_MEDIUM, BODY_SIZE_LARGE, body_size);
   printf("-t      \tTarget address [%s]\n", target_address);
   printf("-u      \tSend all messages presettled [%s]\n", BOOL2STR(presettle));
+  printf("-v      \tPrint periodic status messages [off]\n");
   exit(1);
 }
 
 int main(int argc, char** argv)
 {
+    int64_t  print_deadline = 0;
+
     /* command line options */
     opterr = 0;
     int c;
-    while ((c = getopt(argc, argv, "ha:c:i:lns:t:u")) != -1) {
+    while ((c = getopt(argc, argv, "ha:c:i:lns:t:uv")) != -1) {
         switch(c) {
         case 'h': usage(); break;
         case 'a': host_address = optarg; break;
@@ -342,6 +350,8 @@ int main(int argc, char** argv)
             break;
         case 't': target_address = optarg; break;
         case 'u': presettle = true; break;
+        case 'v': print_deadline = now_usec() + (10 * USECS_PER_SECOND); break;
+
         default:
             usage();
             break;
@@ -384,6 +394,10 @@ int main(int argc, char** argv)
             if (pn_link) pn_link_close(pn_link);
             if (pn_ssn) pn_session_close(pn_ssn);
             pn_connection_close(pn_conn);
+        } else if (print_deadline && now_usec() >= print_deadline) {
+            printf("  -> sent: %"PRIu64" acked: %"PRIu64"  (%"PRIu64" accepted) capacity: %d\n",
+                   count, acked, accepted, pn_link_credit(pn_link));
+            print_deadline = now_usec() + (10 * USECS_PER_SECOND);
         }
     }
 
