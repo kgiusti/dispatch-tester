@@ -194,6 +194,8 @@ uint64_t  total_stall;
 int       stall_count;
 uint64_t  sum_of_squares;
 
+uint64_t  credit_grants;
+int       grant_count;
 /* Process each event posted by the reactor.
  */
 static void event_handler(pn_handler_t *handler,
@@ -222,50 +224,56 @@ static void event_handler(pn_handler_t *handler,
     case PN_LINK_FLOW: {
         // the remote has given us some credit, now we can send messages
         //
-        if (stalled) {
-            struct timespec end;
-            now_timespec(&end);
-            int64_t diff = diff_timespec_usec(&start_stall, &end);
-            if (diff > 0) {
-                stall_count += 1;
-                total_stall += (uint64_t)diff;
-                sum_of_squares += (uint64_t)(diff * diff);
-                if (diff > worse_stall) worse_stall = (uint64_t)diff;
-            }
-            stalled = false;
-        }
         static long tag = 0;  // a simple tag generator
         pn_link_t *sender = pn_event_link(event);
         int credit = pn_link_credit(sender);
-        if (credit && !start_ts) start_ts = now_usec();
-        while (credit > 0 && (limit == 0 || count < limit)) {
-            --credit;
-            ++count;
-            ++tag;
-            pn_delivery_t *delivery;
-            delivery = pn_delivery(sender,
-                                   pn_dtag((const char *)&tag, sizeof(tag)));
-            if (add_timestamp) {
-                generate_message(now_usec());
+
+        if (credit > 0) {
+            if (stalled) {
+                struct timespec end;
+                now_timespec(&end);
+                int64_t diff = diff_timespec_usec(&start_stall, &end);
+                if (diff > 0) {
+                    stall_count += 1;
+                    total_stall += (uint64_t)diff;
+                    sum_of_squares += (uint64_t)(diff * diff);
+                    if (diff > worse_stall) worse_stall = (uint64_t)diff;
+                }
+                stalled = false;
             }
 
-            pn_link_send(sender, encode_buffer, encoded_data_size);
-            pn_link_advance(sender);
-            if (presettle) {
-                pn_delivery_settle(delivery);
-                if (limit && count == limit) {
-                    // no need to wait for acks
-                    stop = true;
-                    pn_reactor_wakeup(reactor);
+            grant_count += 1;
+            credit_grants += credit;
+
+            if (!start_ts) start_ts = now_usec();
+            while (credit > 0 && (limit == 0 || count < limit)) {
+                --credit;
+                ++count;
+                ++tag;
+                pn_delivery_t *delivery;
+                delivery = pn_delivery(sender,
+                                       pn_dtag((const char *)&tag, sizeof(tag)));
+                if (add_timestamp) {
+                    generate_message(now_usec());
+                }
+
+                pn_link_send(sender, encode_buffer, encoded_data_size);
+                pn_link_advance(sender);
+                if (presettle) {
+                    pn_delivery_settle(delivery);
+                    if (limit && count == limit) {
+                        // no need to wait for acks
+                        stop = true;
+                        pn_reactor_wakeup(reactor);
+                    }
                 }
             }
-        }
 
-        if (credit == 0) {
-            stalled = true;
-            now_timespec(&start_stall);
+            if (credit == 0) {
+                stalled = true;
+                now_timespec(&start_stall);
+            }
         }
-
     } break;
 
     case PN_DELIVERY: {
@@ -411,6 +419,11 @@ int main(int argc, char** argv)
                (double)imean / 1000.0,
                (double)worse_stall / 1000.0,
                (double)std_dev / 1000.0);
+    }
+
+    if (grant_count) {
+        printf("   Avg credit grant: %.3f credits\n",
+               (double)credit_grants / (double)grant_count);
     }
 
     return 0;
