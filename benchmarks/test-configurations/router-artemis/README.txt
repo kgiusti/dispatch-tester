@@ -1,5 +1,6 @@
 A router fronting access to the Artemis broker.
 
+Clients connect to the router on port 5672.
 
 broker.xml configures Artemis on port 10000 with a queue 'benchmark'
 defined. Easiest things is to create a new artemis instance and then
@@ -21,6 +22,6 @@ Notes for the Artemis Noob:
 
 6) copy broker.xml into mybroker/etc/ (overwrites default config)
 
-7) ./bin/artemis run &
+7) cd mybroker; ./bin/artemis run &
 
 8) Profit!!!
