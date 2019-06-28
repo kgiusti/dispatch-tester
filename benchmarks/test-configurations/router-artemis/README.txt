@@ -2,6 +2,9 @@ A router fronting access to the Artemis broker.
 
 Clients connect to the router on port 5672.
 
+Example:
+    $ ./receiver -c 500000 & sleep 3; ./sender -c 500000
+
 broker.xml configures Artemis on port 10000 with a queue 'benchmark'
 defined. Easiest things is to create a new artemis instance and then
 copy this into the <artemis-instance-home>/etc

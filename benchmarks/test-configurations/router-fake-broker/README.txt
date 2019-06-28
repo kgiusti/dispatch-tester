@@ -7,3 +7,7 @@ fake-qdrouterd.conf configures a standalone router listening on port
 
 qdrouterd.conf configures a router to use FakeRouter as a waypoint for
 the "benchmark" address.
+
+
+Example:
+    $ ./receiver -c 500000 & sleep 3; ./sender -c 500000
