@@ -228,7 +228,7 @@ static void event_handler(pn_handler_t *handler,
         pn_link_t *sender = pn_event_link(event);
         int credit = pn_link_credit(sender);
 
-        if (credit > 0) {
+        if (credit > 0 && (limit == 0 || count < limit)) {
             if (stalled) {
                 struct timespec end;
                 now_timespec(&end);
@@ -269,7 +269,7 @@ static void event_handler(pn_handler_t *handler,
                 }
             }
 
-            if (credit == 0) {
+            if (credit == 0 && (limit == 0 || count < limit)) {
                 stalled = true;
                 now_timespec(&start_stall);
             }
