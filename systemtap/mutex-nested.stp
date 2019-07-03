@@ -1,0 +1,66 @@
+//!/usr/bin/stap
+//
+// Graciously "borrowed" from Alan Conway.
+//
+// This script identifies codepaths that take more than one lock
+// Run with -x and -d for a particular process, e.g. for qdrouterd:
+//
+// sudo stap ~/work/dispatch/dispatch-tester/systemtap/mutex-nested.stp  -x $(pidof qdrouterd) -d /home/kgiusti/work/dispatch/qpid-dispatch/BUILD/src/libqpid-dispatch.so -d /usr/lib64/libpython2.7.so.1.0 -d kernel -d /home/kgiusti/work/dispatch/qpid-dispatch/BUILD/router/qdrouterd -d /opt/kgiusti/lib64/libqpid-proton-proactor.so.1.4.0 -d /opt/kgiusti/lib64/libqpid-proton-core.so.10.7.0 -DMAXMAPENTRIES=100000 -s 1000 -v -g --suppress-time-limits
+//
+// When the script is killed (Ctrl-C or kill -int) it prints stack traces where more than one lock is held by a thread.
+//
+// Filter the output with c++filt to get readable C++ function names.
+//
+// NOTE: You'll need to install debuginfo for the pthread libraries, e.g. on RHEL/Fedora:
+//     sudo debuginfo-install glibc
+//
+// TODO:
+//
+// The trace gives an address, function and library. Would be nice to
+// convert the address into a file:line to precisely identify the
+// lock statement. addr2line should be able to do this but haven't figured it
+// out yet.
+//
+
+global thread_locks		  // count of locks taken by a thread
+global mutex_stacks		  // stack traces per mutex
+global mutex_count		  // max depth
+
+probe process("/lib64/libpthread.so.0").function("pthread_mutex_lock").return {
+  if (target() == pid()) {
+    ++thread_locks[tid()]
+  }
+}
+
+probe process("/lib64/libpthread.so.0").function("pthread_mutex_unlock") {
+  if (target() == pid()) {
+    // NOTE:
+    // 1. Systemtap locks any global arrays we touch for the duration
+    // of the probe so there is no race here.
+    // 2. We can get thread_lock count == 0 in the case that a mutex was locked before
+    // the script started executing.  We ignore these.
+    t = tid()
+    if (thread_locks[t] > 1) {
+      if ($mutex in mutex_stacks) {
+        if (thread_locks[t] > mutex_count[$mutex]) {
+          mutex_count[$mutex] = thread_locks[t]
+          mutex_stacks[$mutex] = sprint_ubacktrace()
+        }
+      } else {
+        mutex_count[$mutex] = thread_locks[t]
+        mutex_stacks[$mutex] = sprint_ubacktrace()
+      }
+      thread_locks[t]--
+    }
+  }
+}
+
+probe end {
+  printf("\n\n  **************\n")
+  printf("  Nested mutexes\n")
+  printf("  **************\n\n")
+  foreach ([m] in mutex_stacks limit 100) {
+    printf ("==== mutex %p nested (%d max)\n%s\n\n",
+	    m, mutex_count[m], mutex_stacks[m])
+  }
+}

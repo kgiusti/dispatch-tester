@@ -1,0 +1,123 @@
+//!/usr/bin/stap
+//
+// Graciously "borrowed" from Alan Conway.
+//
+// This script identifies contended mutex locks and the longest held locks by a stack trace.
+// Run with -x and -d for a particular process, e.g. for qdrouterd:
+//
+// sudo stap ~/work/dispatch/dispatch-tester/systemtap/mutex-contention.stp  -x $(pidof qdrouterd) -d /home/kgiusti/work/dispatch/qpid-dispatch/BUILD/src/libqpid-dispatch.so -d /usr/lib64/libpython2.7.so.1.0 -d kernel -d /home/kgiusti/work/dispatch/qpid-dispatch/BUILD/router/qdrouterd -d /opt/kgiusti/lib64/libqpid-proton-proactor.so.1.4.0 -d /opt/kgiusti/lib64/libqpid-proton-core.so.10.7.0 -DMAXMAPENTRIES=100000 -s 1000 -v -g --suppress-time-limits
+//
+// When the script is killed (Ctrl-C or kill -int) it prints statistics for
+// contended lock wait times and a stack trace to one of the contended lock locations
+// for the most contended locks.
+//
+// Filter the output with c++filt to get readable C++ function names.
+//
+// NOTE: You'll need to install debuginfo for the pthread libraries, e.g. on RHEL/Fedora:
+//     sudo debuginfo-install glibc
+//
+// TODO:
+//
+// The trace gives an address, function and library. Would be nice to
+// convert the address into a file:line to precisely identify the
+// lock statement. addr2line should be able to do this but haven't figured it
+// out yet.
+//
+// Might also be interesting to do statistics by contended lock
+// location rather than by mutex.
+//
+
+global thread_contended		  // time of latest contended lock call on thread.
+global mutex_waits                // stats on contended wait times by mutex.
+global mutex_locks		  // number of threads currently attempting to lock mutex.
+global mutex_stacks		  // stack traces per mutex
+global mutex_missed		  // possibly missed contention
+global mutex_held                 // stats on how long a mutex is held
+global mutex_start
+global mutex_max_stack
+
+probe process("/lib64/libpthread.so.0").function("pthread_mutex_lock") {
+  if (target() == pid()) {
+    if (++mutex_locks[$mutex] > 1) // Contended
+	thread_contended[tid()] = gettimeofday_us()
+  }
+}
+
+probe process("/lib64/libpthread.so.0").function("pthread_mutex_lock").return {
+  // Note: this is lock.return so at this point the current thread is holding
+  // the lock. No other thread can modify mutex_waits[$mutex] till this thread
+  // calls unlock.
+  if (target() == pid()) {
+    tod = gettimeofday_us()
+    contended = thread_contended[tid()]
+    if (contended) {
+      delete thread_contended[tid()]
+      diff = tod - contended
+      if (diff > 250) {  // ignore < 250 usecs
+          mutex_waits[$mutex] <<< (tod - contended)
+          if (@count(mutex_waits[$mutex]) == 1) {   // First contention of this mutex
+              // printf ("mutex %p: contended\n", $mutex)
+              // We need to capture the stack trace here, not in end() to get a useful trace.
+              mutex_stacks[$mutex] = sprint_ubacktrace()
+          }
+      }
+    }
+    mutex_start[$mutex] = tod
+  }
+}
+
+probe process("/lib64/libpthread.so.0").function("pthread_mutex_unlock") {
+  if (target() == pid()) {
+    // NOTE:
+    // 1. Systemtap locks any global arrays we touch for the duration
+    // of the probe so there is no race here.
+    // 2. We can get count < 0 in the case that a mutex was locked before
+    // the script started executing and so was not counted.
+
+    tod = gettimeofday_us()
+    start = mutex_start[$mutex]
+    if (start) {
+        delete mutex_start[$mutex]
+        diff = tod - start
+        if (diff > 250) {   // not bothering storing < 250 usecs
+          mutex_held[$mutex] <<< diff
+          if (diff == @max(mutex_held[$mutex])) {
+              mutex_max_stack[$mutex] = sprint_ubacktrace()
+          }
+       }
+    }
+    if (--mutex_locks[$mutex] <= 0)
+      delete mutex_locks[$mutex];
+  }
+}
+
+probe end {
+  printf("\n\n  **************************************\n")
+  printf("  Contended mutexes, most frequent first\n")
+  printf("  **************************************\n\n")
+  foreach ([m] in mutex_waits- limit 100) {
+    printf ("==== mutex %p contended %d times, %d us total, %d us avg\n",
+	    m,
+	    @count(mutex_waits[m]),
+	    @sum(mutex_waits[m]),
+	    @avg(mutex_waits[m]))
+    printf("%s\n\n", mutex_stacks[m])
+  }
+
+  printf("\n\n  ******************\n")
+  printf("  Longest held locks\n")
+  printf("  ******************\n\n")
+  foreach ([m] in mutex_held- limit 100) {
+    printf ("==== mutex %p %d us max, %d us total, %d us avg\n",
+	    m,
+	    @max(mutex_held[m]),
+	    @sum(mutex_held[m]),
+	    @avg(mutex_held[m]))
+    printf("%s\n\n", mutex_max_stack[m])
+  }
+  // printf("\n\nInvalid lock counts, possibly missed contention\n\n")
+  // foreach ([m] in mutex_missed- limit 100) {
+  // printf ("==== mutex %p: detected invalid lock count %d times\n", m, mutex_missed[m])
+  // printf("%s\n\n", mutex_stacks[m])
+  // }
+}
