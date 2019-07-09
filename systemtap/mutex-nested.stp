@@ -61,6 +61,6 @@ probe end {
   printf(" **************\n\n")
 
   foreach ([s] in stacks-) {
-    printf("%s\n\n", s)
+    printf("Occured %d times:\n%s\n\n", stacks[s], s)
   }
 }
