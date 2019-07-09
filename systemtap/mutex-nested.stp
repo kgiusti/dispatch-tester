@@ -5,9 +5,10 @@
 // This script identifies codepaths that take more than one lock
 // Run with -x and -d for a particular process, e.g. for qdrouterd:
 //
-// sudo stap ~/work/dispatch/dispatch-tester/systemtap/mutex-nested.stp  -x $(pidof qdrouterd) -d /home/kgiusti/work/dispatch/qpid-dispatch/BUILD/src/libqpid-dispatch.so -d /usr/lib64/libpython2.7.so.1.0 -d kernel -d /home/kgiusti/work/dispatch/qpid-dispatch/BUILD/router/qdrouterd -d /opt/kgiusti/lib64/libqpid-proton-proactor.so.1.4.0 -d /opt/kgiusti/lib64/libqpid-proton-core.so.10.7.0 -DMAXMAPENTRIES=100000 -s 1000 -v -g --suppress-time-limits
+// sudo stap ~/work/dispatch/dispatch-tester/systemtap/mutex-nested.stp  -x $(pidof qdrouterd) -d /home/kgiusti/work/dispatch/qpid-dispatch/BUILD/src/libqpid-dispatch.so -d /usr/lib64/libpython2.7.so.1.0 -d kernel -d /home/kgiusti/work/dispatch/qpid-dispatch/BUILD/router/qdrouterd -d /opt/kgiusti/lib64/libqpid-proton-proactor.so.1.4.0 -d /opt/kgiusti/lib64/libqpid-proton-core.so.10.7.0 -DMAXSTRINGLEN=4096 -DMAXMAPENTRIES=100000 -s 1000 -v -g --suppress-time-limits
 //
 // When the script is killed (Ctrl-C or kill -int) it prints stack traces where more than one lock is held by a thread.
+// Note: if the stack traces are cut off you may need to increase the value of -DMAXSTRINGLEN above.
 //
 // Filter the output with c++filt to get readable C++ function names.
 //
@@ -22,45 +23,44 @@
 // out yet.
 //
 
-global thread_locks		  // count of locks taken by a thread
-global mutex_stacks		  // stack traces per mutex
-global mutex_count		  // max depth
+global thread_stacks  // track the threads current stack frame
+global thread_locks   // how many locks are held
+global stacks         // all nested mutex stacks
 
 probe process("/lib64/libpthread.so.0").function("pthread_mutex_lock").return {
-  if (target() == pid()) {
-    ++thread_locks[tid()]
-  }
+  if (target() != pid()) next;
+
+  t = tid()
+  thread_stacks[t, thread_locks[t]] = sprint_ubacktrace()
+  thread_locks[t]++
+  if (thread_locks[t] > 1)
+    {
+     index = ""
+     count = thread_locks[t] - 1
+     while (count >= 0)
+       {
+        index = sprintf("%s%d:\n%s\n", index, count, thread_stacks[t, count])
+        count--
+       }
+     stacks[index]++
+    }
 }
 
 probe process("/lib64/libpthread.so.0").function("pthread_mutex_unlock") {
-  if (target() == pid()) {
-    // NOTE:
-    // 1. Systemtap locks any global arrays we touch for the duration
-    // of the probe so there is no race here.
-    // 2. We can get thread_lock count == 0 in the case that a mutex was locked before
-    // the script started executing.  We ignore these.
-    t = tid()
-    if (thread_locks[t] > 1) {
-      if ($mutex in mutex_stacks) {
-        if (thread_locks[t] > mutex_count[$mutex]) {
-          mutex_count[$mutex] = thread_locks[t]
-          mutex_stacks[$mutex] = sprint_ubacktrace()
-        }
-      } else {
-        mutex_count[$mutex] = thread_locks[t]
-        mutex_stacks[$mutex] = sprint_ubacktrace()
-      }
-      thread_locks[t]--
-    }
-  }
+  if (target() != pid()) next;
+
+  t = tid()
+  if (thread_locks[t] == 0) next
+  thread_locks[t]--
+  delete thread_stacks[t, thread_locks[t]]
 }
 
 probe end {
-  printf("\n\n  **************\n")
-  printf("  Nested mutexes\n")
-  printf("  **************\n\n")
-  foreach ([m] in mutex_stacks limit 100) {
-    printf ("==== mutex %p nested (%d max)\n%s\n\n",
-	    m, mutex_count[m], mutex_stacks[m])
+  printf("\n\n **************\n")
+  printf(" nested mutexes\n")
+  printf(" **************\n\n")
+
+  foreach ([s] in stacks-) {
+    printf("%s\n\n", s)
   }
 }
