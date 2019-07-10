@@ -78,6 +78,23 @@ pn_reactor_t *reactor;
 pn_message_t *out_message;
 
 int64_t start_ts;
+int64_t stop_ts;
+
+int64_t ack_start_ts;
+int64_t ack_stop_ts;
+
+static struct timespec start_stall;
+bool      stalled;
+uint64_t  worse_stall;
+uint64_t  total_stall;
+int       stall_count;
+uint64_t  sum_of_squares;
+uint64_t  credit_grants;
+int       grant_count;
+
+
+
+
 
 // microseconds per second
 #define USECS_PER_SECOND 1000000
@@ -187,15 +204,6 @@ static void delete_handler(pn_handler_t *handler)
 }
 
 
-static struct timespec start_stall;
-bool      stalled;
-uint64_t  worse_stall;
-uint64_t  total_stall;
-int       stall_count;
-uint64_t  sum_of_squares;
-
-uint64_t  credit_grants;
-int       grant_count;
 /* Process each event posted by the reactor.
  */
 static void event_handler(pn_handler_t *handler,
@@ -269,7 +277,9 @@ static void event_handler(pn_handler_t *handler,
                 }
             }
 
-            if (credit == 0 && (limit == 0 || count < limit)) {
+            if (limit && count == limit) {   // done
+                stop_ts = now_usec();
+            } else if (credit == 0) {
                 stalled = true;
                 now_timespec(&start_stall);
             }
@@ -289,6 +299,9 @@ static void event_handler(pn_handler_t *handler,
                 ++acked;
                 ++accepted;
                 pn_delivery_settle(dlv);
+                if (!ack_start_ts) {
+                    ack_start_ts = now_usec();
+                }
                 break;
             case PN_REJECTED:
             case PN_RELEASED:
@@ -296,13 +309,14 @@ static void event_handler(pn_handler_t *handler,
             default:
                 ++acked;
                 pn_delivery_settle(dlv);
-                fprintf(stderr, "Message not accepted - code:%lu\n", (unsigned long)rs);
+                fprintf(stderr, "Message not accepted - code: 0x%lX\n", (unsigned long)rs);
                 break;
             }
 
             if (limit && acked == limit) {
                 // initiate clean shutdown of the endpoints
                 stop = true;
+                ack_stop_ts = now_usec();
                 pn_reactor_wakeup(reactor);
             }
         }
@@ -422,9 +436,21 @@ int main(int argc, char** argv)
     }
 
     if (grant_count) {
-        printf("   Avg credit grant: %.3f credits\n",
-               (double)credit_grants / (double)grant_count);
+        printf("  Avg credit grant: %.3f credits (%d grants total)\n",
+               (double)credit_grants / (double)grant_count,
+               grant_count);
     }
+
+    printf("  Start tx  -> stop tx:   %.3f msec\n"
+           "  Start ack -> stop ack:  %.3f msec\n"
+           "  Start tx  -> start ack: %.3f msec\n"
+           "  Stop tx   -> stop ack:  %.3f msec\n"
+           "  Start tx  -> stop ack:  %.3f msec\n",
+           (stop_ts - start_ts) / 1000.0,
+           (ack_stop_ts - ack_start_ts) / 1000.0,
+           (ack_start_ts - start_ts) / 1000.0,
+           (ack_stop_ts - stop_ts) / 1000.0,
+           (ack_stop_ts - start_ts) / 1000.0);
 
     return 0;
 }
