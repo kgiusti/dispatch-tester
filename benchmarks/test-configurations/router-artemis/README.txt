@@ -21,7 +21,7 @@ Notes for the Artemis Noob:
    mkdir broker
 
 5) Create a new broker:
-   $ARTEMIS_HOME/bin/artemis create mybroker
+   $ARTEMIS_HOME/bin/artemis create mybroker --allow-anonymous --user guest --password guest
 
 6) copy broker.xml into mybroker/etc/ (overwrites default config)
 
