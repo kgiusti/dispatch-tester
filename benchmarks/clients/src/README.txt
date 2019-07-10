@@ -14,6 +14,9 @@ acceptable if the average credit granted is close to the router's
 linkCapacity (250 by default), but if the average credit grant is only
 2 credits per 1msec, well, that's bad, ummkay?
 
+server client - this acts like a fake broker and can be used for
+benchmarking link route configurations.
+
 Use the "-h" option for argument details.
 
 Run the build.sh script to build the executables.  Expects
