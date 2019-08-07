@@ -18,6 +18,8 @@
  *
  */
 
+#define ADD_ANNOTATIONS 1
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -60,6 +62,7 @@ uint64_t accepted = 0;
 bool use_anonymous = false;       // use anonymous link if true
 bool presettle = false;           // true = send presettled
 bool add_timestamp = false;
+bool add_annotations = false;
 int body_size = BODY_SIZE_SMALL;
 
 // buffer for encoded message
@@ -130,6 +133,68 @@ static int64_t diff_timespec_usec(const struct timespec *start,
 }
 
 
+// odd-length long string
+const char big_string[] =
+    "+"
+    "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+    "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+    "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+    "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+    "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+    "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+    "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+    "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+    "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+    "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789";
+
+
+static void add_message_annotations(pn_message_t *out_message)
+{
+    // just a bunch of dummy MA
+    pn_data_t *annos = pn_message_annotations(out_message);
+    pn_data_clear(annos);
+    pn_data_put_map(annos);
+    pn_data_enter(annos);
+
+    pn_data_put_symbol(annos, pn_bytes(strlen("my-key"), "my-key"));
+    pn_data_put_string(annos, pn_bytes(strlen("my-data"), "my-data"));
+
+    pn_data_put_symbol(annos, pn_bytes(strlen("my-other-key"), "my-other-key"));
+    pn_data_put_string(annos, pn_bytes(strlen("my-other-data"), "my-other-data"));
+
+    // embedded map
+    pn_data_put_symbol(annos, pn_bytes(strlen("my-map"), "my-map"));
+    pn_data_put_map(annos);
+    pn_data_enter(annos);
+    pn_data_put_symbol(annos, pn_bytes(strlen("my-map-key1"), "my-map-key1"));
+    pn_data_put_char(annos, 'X');
+    pn_data_put_symbol(annos, pn_bytes(strlen("my-map-key2"), "my-map-key2"));
+    pn_data_put_byte(annos, 0x12);
+    pn_data_put_symbol(annos, pn_bytes(strlen("my-map-key3"), "my-map-key3"));
+    pn_data_put_string(annos, pn_bytes(strlen("Are We Not Men?"), "Are We Not Men?"));
+    pn_data_put_symbol(annos, pn_bytes(strlen("my-last-key"), "my-last-key"));
+    pn_data_put_binary(annos, pn_bytes(sizeof(big_string), big_string));
+    pn_data_exit(annos);
+
+    pn_data_put_symbol(annos, pn_bytes(strlen("my-ulong"), "my-ulong"));
+    pn_data_put_ulong(annos, 0xDEADBEEFCAFEBEEF);
+
+    // embedded list
+    pn_data_put_symbol(annos, pn_bytes(strlen("my-list"), "my-list"));
+    pn_data_put_list(annos);
+    pn_data_enter(annos);
+    pn_data_put_string(annos, pn_bytes(sizeof(big_string), big_string));
+    pn_data_put_double(annos, 3.1415);
+    pn_data_put_short(annos, 1966);
+    pn_data_exit(annos);
+
+    pn_data_put_symbol(annos, pn_bytes(strlen("my-bool"), "my-bool"));
+    pn_data_put_bool(annos, false);
+
+    pn_data_exit(annos);
+}
+
+
 void generate_message(int64_t now_usec)
 {
     if (!out_message) {
@@ -150,6 +215,10 @@ void generate_message(int64_t now_usec)
     pn_data_put_binary(body, body_data);
 
     pn_data_exit(body);
+
+    if (add_annotations) {
+        add_message_annotations(out_message);
+    }
 
     // now encode it
 
@@ -340,6 +409,7 @@ static void usage(void)
   printf("-t      \tTarget address [%s]\n", target_address);
   printf("-u      \tSend all messages presettled [%s]\n", BOOL2STR(presettle));
   printf("-v      \tPrint periodic status messages [off]\n");
+  printf("-M      \tAdd dummy Message Annotations section [off]\n");
   exit(1);
 }
 
@@ -350,7 +420,7 @@ int main(int argc, char** argv)
     /* command line options */
     opterr = 0;
     int c;
-    while ((c = getopt(argc, argv, "ha:c:i:lns:t:uv")) != -1) {
+    while ((c = getopt(argc, argv, "ha:c:i:lns:t:uvM")) != -1) {
         switch(c) {
         case 'h': usage(); break;
         case 'a': host_address = optarg; break;
@@ -373,6 +443,7 @@ int main(int argc, char** argv)
         case 't': target_address = optarg; break;
         case 'u': presettle = true; break;
         case 'v': print_deadline = now_usec() + (10 * USECS_PER_SECOND); break;
+        case 'M': add_annotations = true; break;
 
         default:
             usage();

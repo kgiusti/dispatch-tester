@@ -38,8 +38,8 @@ for QDRPID in $ROUTERPIDS; do
     ps -L --pid $QDRPID -o tid= |\
         while read tid
         do
-            #perf record -F max -g --per-thread -s --tid=$tid --output=qdr_perf_${QDRPID}_${tid}.pdata &
-            perf record -F max --call-graph=lbr --per-thread -s --tid=$tid --output=qdr_perf_${QDRPID}_${tid}.pdata &
+            # perf record -F max --call-graph=lbr --per-thread -s --tid=$tid --output=qdr_perf_${QDRPID}_${tid}.pdata &
+            perf record -F max --call-graph=dwarf --per-thread -s --tid=$tid --output=qdr_perf_${QDRPID}_${tid}.pdata &
             echo "Started perf for thread ${tid} in process $QDRPID"
         done
 done
@@ -68,11 +68,11 @@ for QDRPID in $ROUTERPIDS; do
             fi
 
             # Generate per-thread stack-collapse
-            perf script -i ./qdr_perf_${QDRPID}_${tid}.pdata | stackcollapse-perf.pl > $TMPFILE
+            perf script -i ./qdr_perf_${QDRPID}_${tid}.pdata | stackcollapse-perf.pl --tid > $TMPFILE
 
             # Generate flamegraph
             title="qdrouterd $QDRPID thread $tid ($TYPE)"
-            flamegraph.pl  --title "${title}" --height 48 --width 1600 $TMPFILE > ./qdr_perf_${TYPE}_${QDRPID}_${tid}.svg
+            flamegraph.pl  --hash --title "${title}" --height 48 --width 1600 $TMPFILE > ./qdr_perf_${TYPE}_${QDRPID}_${tid}.svg
             rm $TMPFILE
         done
     # this does not work:

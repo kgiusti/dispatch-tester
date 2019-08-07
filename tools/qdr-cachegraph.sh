@@ -71,7 +71,7 @@ for QDRPID in $ROUTERPIDS; do
 
             # Generate flamegraph
             title="qdrouterd $QDRPID thread $tid ($TYPE) cache-miss"
-            flamegraph.pl  --title "${title}" --height 48 --width 1600 $TMPFILE > ./qdr_cache_${TYPE}_${QDRPID}_${tid}.svg
+            flamegraph.pl --hash --colors purple --title "${title}" --height 48 --width 1600 $TMPFILE > ./qdr_cache_${TYPE}_${QDRPID}_${tid}.svg
             rm $TMPFILE
         done
     rm $ALLWORKERS
