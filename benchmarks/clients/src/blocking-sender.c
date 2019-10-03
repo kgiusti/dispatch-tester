@@ -60,6 +60,8 @@ uint64_t acked = 0;               // # of received acks
 uint64_t accepted = 0;
 uint64_t not_accepted = 0;
 
+bool pending_ack = false;         // true == waiting for ack
+
 bool use_anonymous = false;       // use anonymous link if true
 bool presettle = false;           // true = send presettled
 bool add_timestamp = false;
@@ -274,6 +276,69 @@ static void delete_handler(pn_handler_t *handler)
 }
 
 
+static bool send_msg(pn_link_t *sender)
+{
+    static long tag = 0;  // a simple tag generator
+    int credit = pn_link_credit(sender);
+
+    if (credit <= 0) {
+        stalled = true;
+        now_timespec(&start_stall);
+        return false;
+    }
+
+    if (!pending_ack && (limit == 0 || count < limit)) {
+
+        if (stalled) {
+            struct timespec end;
+            now_timespec(&end);
+            int64_t diff = diff_timespec_usec(&start_stall, &end);
+            if (diff > 0) {
+                stall_count += 1;
+                total_stall += (uint64_t)diff;
+                sum_of_squares += (uint64_t)(diff * diff);
+                if (diff > worse_stall) worse_stall = (uint64_t)diff;
+            }
+            stalled = false;
+        }
+
+        grant_count += 1;
+        credit_grants += credit;
+
+        if (!start_ts) start_ts = now_usec();
+
+        ++count;
+        ++tag;
+        pn_delivery_t *delivery;
+        delivery = pn_delivery(sender, pn_dtag((const char *)&tag, sizeof(tag)));
+
+        if (add_timestamp) {
+            generate_message(now_usec());
+        }
+
+        pn_link_send(sender, encode_buffer, encoded_data_size);
+        pn_link_advance(sender);
+        if (!presettle) {
+            pending_ack = true;
+        } else {
+            pn_delivery_settle(delivery);
+        }
+
+        if (limit && count == limit) {
+            stop_ts = now_usec();
+            if (!pending_ack) {
+                // not waiting for acks, so stop now
+                stop = true;
+                pn_reactor_wakeup(reactor);
+            }
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
 /* Process each event posted by the reactor.
  */
 static void event_handler(pn_handler_t *handler,
@@ -302,62 +367,12 @@ static void event_handler(pn_handler_t *handler,
     case PN_LINK_FLOW: {
         // the remote has given us some credit, now we can send messages
         //
-        static long tag = 0;  // a simple tag generator
-        pn_link_t *sender = pn_event_link(event);
-        int credit = pn_link_credit(sender);
-
-        if (credit > 0 && (limit == 0 || count < limit)) {
-            if (stalled) {
-                struct timespec end;
-                now_timespec(&end);
-                int64_t diff = diff_timespec_usec(&start_stall, &end);
-                if (diff > 0) {
-                    stall_count += 1;
-                    total_stall += (uint64_t)diff;
-                    sum_of_squares += (uint64_t)(diff * diff);
-                    if (diff > worse_stall) worse_stall = (uint64_t)diff;
-                }
-                stalled = false;
-            }
-
-            grant_count += 1;
-            credit_grants += credit;
-
-            if (!start_ts) start_ts = now_usec();
-            while (credit > 0 && (limit == 0 || count < limit)) {
-                --credit;
-                ++count;
-                ++tag;
-                pn_delivery_t *delivery;
-                delivery = pn_delivery(sender,
-                                       pn_dtag((const char *)&tag, sizeof(tag)));
-                if (add_timestamp) {
-                    generate_message(now_usec());
-                }
-
-                pn_link_send(sender, encode_buffer, encoded_data_size);
-                pn_link_advance(sender);
-                if (presettle) {
-                    pn_delivery_settle(delivery);
-                    if (limit && count == limit) {
-                        // no need to wait for acks
-                        stop = true;
-                        pn_reactor_wakeup(reactor);
-                    }
-                }
-            }
-
-            if (limit && count == limit) {   // done
-                stop_ts = now_usec();
-            } else if (credit == 0) {
-                stalled = true;
-                now_timespec(&start_stall);
-            }
-        }
+        send_msg(pn_event_link(event));
     } break;
 
     case PN_DELIVERY: {
         pn_delivery_t *dlv = pn_event_delivery(event);
+
         if (pn_delivery_updated(dlv)) {
             uint64_t rs = pn_delivery_remote_state(dlv);
             switch (rs) {
@@ -366,6 +381,7 @@ static void event_handler(pn_handler_t *handler,
                 // peer is still processing the message.
                 break;
             case PN_ACCEPTED:
+                pending_ack = false;
                 ++acked;
                 ++accepted;
                 pn_delivery_settle(dlv);
@@ -377,14 +393,21 @@ static void event_handler(pn_handler_t *handler,
             case PN_RELEASED:
             case PN_MODIFIED:
             default:
+                pending_ack = false;
                 ++acked;
                 ++not_accepted;
                 pn_delivery_settle(dlv);
-                fprintf(stderr, "Message not accepted - code: 0x%lX\n", (unsigned long)rs);
+                if (!ack_start_ts) {
+                    ack_start_ts = now_usec();
+                }
+                // fprintf(stderr, "Message not accepted - code: 0x%lX\n", (unsigned long)rs);
                 break;
             }
 
-            if (limit && acked == limit) {
+            if (!limit || count < limit) {
+                // send next message
+                send_msg(pn_event_link(event));
+            } else if (acked == limit) {
                 // initiate clean shutdown of the endpoints
                 stop = true;
                 ack_stop_ts = now_usec();
@@ -520,7 +543,7 @@ int main(int argc, char** argv)
             printf("FAILURE! Sent: %ld  Acked: %ld\n", count, accepted + not_accepted);
         }
     }
-    
+
     printf("  Start tx  -> stop tx:   %.3f msec\n"
            "  Start ack -> stop ack:  %.3f msec\n"
            "  Start tx  -> start ack: %.3f msec\n"

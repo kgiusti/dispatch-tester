@@ -1,8 +1,10 @@
 sender and receiver clients for benchmarking.
 
-These clients are designed to send and receive as fast as possible.
-The sender's rate is only limited by the amount of credit that has
-been granted to it.
+The sender and receiver clients are designed to transfer messages as
+fast as possible.  The sender client's rate is only limited by the
+amount of credit that has been granted to it.  The blocking-sender
+sends a single message at a time, blocking until the terminal outcome
+is received before sending the next message.
 
 'credit stalls' - count the number of times the sender has stopped
 sending due to running out of credit.  This is expected as the sender
