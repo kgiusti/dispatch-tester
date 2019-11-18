@@ -84,7 +84,7 @@ RUN wget ${dispatch_url}/${dispatch_branch}.tar.gz \
     && tar -xvzf ${dispatch_branch}.tar.gz \
     && mkdir -p qpid-dispatch-${dispatch_branch}/BUILD \
     && cd qpid-dispatch-${dispatch_branch}/BUILD \
-    && cmake .. -DCMAKE_INSTALL_PREFIX=/usr \
+    && cmake .. -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Debug \
     && make install \
     && cd /main \
     && rm -rf ${dispatch_branch}.tar.gz qpid-dispatch-${dispatch_branch}

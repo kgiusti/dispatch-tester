@@ -327,10 +327,10 @@ static void event_handler(pn_handler_t *handler,
             while (credit > 0 && (limit == 0 || count < limit)) {
                 --credit;
                 ++count;
-                ++tag;
                 pn_delivery_t *delivery;
                 delivery = pn_delivery(sender,
                                        pn_dtag((const char *)&tag, sizeof(tag)));
+                ++tag;
                 if (add_timestamp) {
                     generate_message(now_usec());
                 }
@@ -357,9 +357,15 @@ static void event_handler(pn_handler_t *handler,
     } break;
 
     case PN_DELIVERY: {
+        static long last_tag = -1;
         pn_delivery_t *dlv = pn_event_delivery(event);
         if (pn_delivery_updated(dlv)) {
             uint64_t rs = pn_delivery_remote_state(dlv);
+
+            pn_delivery_tag_t raw_tag = pn_delivery_tag(dlv);
+            long this_tag;
+            memcpy((char *)&this_tag, raw_tag.start, sizeof(this_tag));
+
             switch (rs) {
             case PN_RECEIVED:
                 // This is not a terminal state - it is informational, and the
@@ -368,6 +374,14 @@ static void event_handler(pn_handler_t *handler,
             case PN_ACCEPTED:
                 ++acked;
                 ++accepted;
+
+                if (this_tag != last_tag + 1) {
+                    fprintf(stderr, "!!!!!!!!!!!!!!!!!!    UNEXPECTED TAG: 0x%lu (0x%lu)\n   !!!!!!!!!!!!!!!!!!!!",
+                            this_tag, last_tag + 1);
+                    exit(-1);
+                }
+                last_tag = this_tag;
+
                 pn_delivery_settle(dlv);
                 if (!ack_start_ts) {
                     ack_start_ts = now_usec();

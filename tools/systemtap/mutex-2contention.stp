@@ -1,0 +1,129 @@
+//!/usr/bin/stap
+//
+// Graciously "borrowed" from Alan Conway.
+//
+// This script identifies contended mutex locks and the longest held locks by a stack trace.
+// Run with -x and -d for a particular process, e.g. for qdrouterd:
+//
+// sudo stap ~/work/dispatch/dispatch-tester/systemtap/mutex-contention.stp  -x $(pidof qdrouterd) -d /home/kgiusti/work/dispatch/qpid-dispatch/BUILD/src/libqpid-dispatch.so -d /usr/lib64/libpython2.7.so.1.0 -d kernel -d /home/kgiusti/work/dispatch/qpid-dispatch/BUILD/router/qdrouterd -d /opt/kgiusti/lib64/libqpid-proton-proactor.so.1.4.0 -d /opt/kgiusti/lib64/libqpid-proton-core.so.10.7.0 -DMAXMAPENTRIES=100000 -s 1000 -v -g --suppress-time-limits -d /usr/lib64/libc-2.27.so 
+//
+// When the script is killed (Ctrl-C or kill -int) it prints statistics for
+// contended lock wait times and a stack trace to one of the contended lock locations
+// for the most contended locks.
+//
+// Filter the output with c++filt to get readable C++ function names.
+//
+// NOTE: You'll need to install debuginfo for the pthread libraries, e.g. on RHEL/Fedora:
+//     sudo debuginfo-install glibc
+//
+// TODO:
+//
+// The trace gives an address, function and library. Would be nice to
+// convert the address into a file:line to precisely identify the
+// lock statement. addr2line should be able to do this but haven't figured it
+// out yet.
+//
+// Might also be interesting to do statistics by contended lock
+// location rather than by mutex.
+//
+
+// only record mutex wait times >= WAIT_THRESHOLD_USEC
+global WAIT_THRESHOLD_USEC = 1;
+
+// only record mutex held times >= HOLD_THRESHOLD_USEC
+global HOLD_THRESHOLD_USEC = 1;
+
+
+global thread_entry_time    // time thread requests mutex - index by tid()
+global thread_mutex_addr    // address of mutex thread requests - tid() index
+global mutex_waits          // time between request and acquire of mutex - index by mutex address
+global mutex_holds          // how long the mutex is held - mutex address index
+global mutex_start          // timestamp on mutex acquired
+global mutex_max_hold_stack // longest time mutex held
+global mutex_max_wait_stack // longest time mutex waited
+
+
+probe process("/lib64/libpthread.so.0").function("pthread_mutex_lock") {
+  // mutex requested - not yet taken
+  if (target() != pid()) next;
+
+  thread_entry_time[tid()] = gettimeofday_us()
+  thread_mutex_addr[tid()] = $mutex
+}
+
+probe process("/lib64/libpthread.so.0").function("pthread_mutex_lock").return {
+  // Note: this is lock.return so at this point the current thread is holding
+  // the lock. It is safe to modify all globals indexed by mutex address
+  // calls unlock.
+  if (target() != pid()) next;
+  if (!tid() in thread_entry_time) next;
+
+  etime = thread_entry_time[tid()]
+  delete thread_entry_time[tid()]
+  maddr = thread_mutex_addr[tid()]
+  delete thread_mutex_addr[tid()]
+
+  if (etime == 0) next;
+
+  now = gettimeofday_us()
+  mutex_start[maddr] = now
+  duration = now - etime
+  if (duration >= WAIT_THRESHOLD_USEC)
+    {
+     mutex_waits[maddr] <<< duration
+     if (duration == @max(mutex_waits[maddr]))
+       {
+        mutex_max_wait_stack[maddr] = sprint_ubacktrace()
+       }
+    }
+}
+
+probe process("/lib64/libpthread.so.0").function("pthread_mutex_unlock") {
+  // Note: $mutex still held - safe to modify mutex arrays
+  if (target() != pid()) next;
+  if (!$mutex in mutex_start) next;
+
+  now = gettimeofday_us()
+  stime = mutex_start[$mutex]
+  delete mutex_start[$mutex]
+
+  if (stime == 0) next;
+
+  duration = now - stime
+  if (duration >= HOLD_THRESHOLD_USEC)
+    {
+     mutex_holds[$mutex] <<< duration
+     if (duration == @max(mutex_holds[$mutex]))
+       {
+        mutex_max_hold_stack[$mutex] = sprint_ubacktrace()
+       }
+    }
+}
+
+
+probe end {
+  printf("\n\n  *************************************\n")
+  printf("  Mutex contention, most frequent first\n")
+  printf("  *************************************\n\n")
+  foreach ([m] in mutex_waits- limit 100) {
+    printf ("==== mutex %p contended %d times, %d us total, %d us avg\n",
+	    m,
+	    @count(mutex_waits[m]),
+	    @sum(mutex_waits[m]),
+	    @avg(mutex_waits[m]))
+    printf("%s\n\n", mutex_max_wait_stack[m])
+  }
+
+  printf("\n\n  ******************\n")
+  printf("  Longest held locks\n")
+  printf("  ******************\n\n")
+  foreach ([m] in mutex_holds- limit 100) {
+    printf ("==== mutex %p %d us max, %d us total, %d us avg\n",
+            m,
+            @max(mutex_holds[m]),
+            @sum(mutex_holds[m]),
+            @avg(mutex_holds[m]))
+    printf("%s\n\n", mutex_max_hold_stack[m])
+  }
+}
+

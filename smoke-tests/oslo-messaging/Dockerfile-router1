@@ -24,7 +24,7 @@
 #   sudo docker run -i -t <username>/dispatch
 
 # Gets the latest Fedora from dockerhub
-FROM fedora:27
+FROM fedora:latest
 
 LABEL maintainer=kgiusti@gmail.com
 
@@ -50,20 +50,25 @@ RUN dnf -y install \
     libuv-devel \
     libwebsockets-devel \
     wget \
+    procps-ng \
     && dnf clean all -y
 
 ARG proton_branch
+ARG proton_url
 ARG dispatch_branch
+ARG dispatch_url
 ENV proton_branch ${proton_branch:-master}
+ENV proton_url ${proton_url:-https://github.com/apache/qpid-proton/archive}
 ENV dispatch_branch ${dispatch_branch:-master}
+ENV dispatch_url ${dispatch_url:-https://github.com/apache/qpid-dispatch/archive}
 
 # Create a main directory for building proton and dispatch router
 #
 WORKDIR /main
 
-# build and install proton from ${proton_branch} on github
+# build and install proton from ${proton_branch} on ${proton_url}
 #
-RUN wget https://github.com/apache/qpid-proton/archive/${proton_branch}.tar.gz \
+RUN wget ${proton_url}/${proton_branch}.tar.gz \
     && tar -xvzf ${proton_branch}.tar.gz \
     && mkdir -p qpid-proton-${proton_branch}/BUILD \
     && cd qpid-proton-${proton_branch}/BUILD \
@@ -73,22 +78,21 @@ RUN wget https://github.com/apache/qpid-proton/archive/${proton_branch}.tar.gz \
     && cd /main \
     && rm -rf ${proton_branch}.tar.gz qpid-proton-${proton_branch}
 
-# build and install dispatch from ${dispatch_branch} on github
+# build and install dispatch from ${dispatch_branch} on ${dispatch_url}
 #
-RUN wget https://github.com/apache/qpid-dispatch/archive/${dispatch_branch}.tar.gz \
+RUN wget ${dispatch_url}/${dispatch_branch}.tar.gz \
     && tar -xvzf ${dispatch_branch}.tar.gz \
     && mkdir -p qpid-dispatch-${dispatch_branch}/BUILD \
     && cd qpid-dispatch-${dispatch_branch}/BUILD \
-    && cmake .. -DCMAKE_INSTALL_PREFIX=/usr \
+    && cmake .. -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Debug \
     && make install \
     && cd /main \
     && rm -rf ${dispatch_branch}.tar.gz qpid-dispatch-${dispatch_branch}
 
 # move the configuration file in place
 #
-COPY qdrouterd.conf /etc/qpid-dispatch/qdrouterd.conf
+COPY router1-qdrouterd.conf /etc/qpid-dispatch/qdrouterd.conf
 
 # Start the dispatch router
 #
 CMD ["qdrouterd"]
-

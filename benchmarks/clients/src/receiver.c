@@ -137,6 +137,8 @@ static void event_handler(pn_handler_t *handler,
     case PN_DELIVERY: {
         // A message has been received
         //
+        if (limit && count == limit) break;
+
         pn_delivery_t *dlv = pn_event_delivery(event);
         if (pn_delivery_readable(dlv) && !pn_delivery_partial(dlv)) {
             // A full message has arrived
@@ -174,14 +176,20 @@ static void event_handler(pn_handler_t *handler,
             pn_delivery_update(dlv, PN_ACCEPTED);
             pn_delivery_settle(dlv);  // dlv is now freed
 
-            if (pn_link_credit(pn_link) <= credit_window/2) {
-                // Grant enough credit to bring it up to CAPACITY:
-                pn_link_flow(pn_link, credit_window - pn_link_credit(pn_link));
-            }
-
             if (limit && count == limit) {
                 stop = true;
                 pn_reactor_wakeup(reactor);
+            } else if (pn_link_credit(pn_link) <= credit_window/2) {
+                // Grant enough credit to bring it up to CAPACITY:
+                int grant = credit_window - pn_link_credit(pn_link);
+                if (limit && (limit - count) < grant) {
+                    // don't grant more than we want to receive
+                    grant = limit - count;
+                }
+                if (grant) {
+                    fprintf(stdout, "Granting credit %d\n", grant);
+                    pn_link_flow(pn_link, credit_window - pn_link_credit(pn_link));
+                }
             }
         }
     } break;

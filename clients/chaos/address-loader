@@ -1,0 +1,157 @@
+#!/usr/bin/python3
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+#
+# This script puts load on the routing subsystem by generating many mobile
+# addresses. This is done by creating a high number of concurrent receiver
+# links.
+#
+
+import argparse
+import uuid
+
+from proton.handlers import MessagingHandler
+from proton.reactor import Container
+
+
+class MulticastGenerator(object):
+    def __init__(self, length):
+        self._address = "multicast/"
+        length -= len(self._address)
+        if length > 0:
+            self._address += "X" * length
+
+    def __call__(self):
+        return self._address
+
+
+class UnicastGenerator(object):
+    def __init__(self, length):
+        self._length = length
+        self._prefix = "closest/"
+        self._unique =  uuid.uuid4().hex
+        self._counter = 0
+
+    def __call__(self):
+        num = str(self._counter)
+        self._counter += 1
+        needed = self._length - (len(num)
+                                 + len(self._prefix)
+                                 + len(self._unique))
+        filler = "X" * needed if needed > 0 else ""
+
+        # put the unique stuff (uuid + counter) at end to make address
+        # comparision a bit more computationally demanding
+        return self._prefix + filler + self._unique + num
+
+
+class AddressLoader(MessagingHandler):
+    """
+    """
+    def __init__(self, address, conns, links_per_conn, verbose, addr_generator,
+                 **handler_args):
+        super(AddressLoader, self).__init__(**handler_args)
+        self.address = address
+        self.num_conns = conns
+        self.links_per_conn = links_per_conn
+        self.verbose = verbose
+        self.addr_generator = addr_generator
+
+        self._conns = {}   # index: _conn_index
+        self._links = {}   # index: _conn_index
+        self._conn_index = 0
+        self._link_index = 0
+
+    def on_start(self, event):
+        self._conns[self._conn_index] = event.container.connect(url=self.address)
+
+    def on_connection_opened(self, event):
+        if self.verbose:
+            print("Connection %s opened" % self._conn_index)
+
+        if self._conn_index not in self._links:
+            self._links[self._conn_index] = set()
+        rx = event.container.create_receiver(event.connection,
+                                             source=self.addr_generator())
+        self._links[self._conn_index].add(rx)
+
+    def on_link_opened(self, event):
+        if self.verbose:
+            print("Link %s:%s opened" % (self._conn_index, self._link_index))
+
+        event.receiver.flow(1)
+        self._link_index += 1
+        if self._link_index < self.links_per_conn:
+            rx = event.container.create_receiver(event.connection,
+                                                 source=self.addr_generator())
+            self._links[self._conn_index].add(rx)
+
+        else:
+            self._conn_index += 1
+            self._link_index = 0
+            if self._conn_index < self.num_conns:
+                conn = event.container.connect(url=self.address)
+                self._conns[self._conn_index] = conn
+            elif self.verbose:
+                print("All links open - total %d"
+                      % (self.num_conns * self.links_per_conn));
+
+
+parser = argparse.ArgumentParser(description="Create a large number of mobile addresses.")
+parser.add_argument("--address",
+                    help="Address of the router",
+                    type=str,
+                    default="127.0.0.1:5672")
+parser.add_argument("--conns",
+                    help="Total # of connections to open",
+                    type=int,
+                    default=10)
+parser.add_argument("--links",
+                    help="Number of links to open PER CONNECTION",
+                    type=int,
+                    default=10000)
+parser.add_argument("--length",
+                    help="Address length in bytes",
+                    type=int,
+                    default=1024)
+parser.add_argument("--verbose",
+                    help="Print status messages",
+                    action='store_true')
+parser.add_argument("--multicast",
+                    help="Use a shared multicast address",
+                    action='store_true')
+args = parser.parse_args()
+
+if args.multicast:
+    ag = MulticastGenerator(args.length)
+else:
+    ag = UnicastGenerator(args.length)
+
+al = AddressLoader(address=args.address,
+                   conns=args.conns,
+                   links_per_conn=args.links,
+                   verbose=args.verbose,
+                   addr_generator=ag)
+
+try:
+    Container(al).run()
+except KeyboardInterrupt:
+    pass
+
