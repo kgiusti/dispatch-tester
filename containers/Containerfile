@@ -32,7 +32,7 @@ LABEL maintainer=kgiusti@gmail.com
 #   proton_url - git url to proton repo
 #   dispatch_branch - git branch/tag name of qdrouterd source
 #   dispatch_url - git url to qdrouterd repo
-#   config_path - qdrouterd config file to use
+#   config_file - qdrouterd config file to use
 
 ARG proton_branch
 ARG proton_url
