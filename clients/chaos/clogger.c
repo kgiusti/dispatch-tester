@@ -18,7 +18,11 @@
  *
  */
 
-#define ADD_ANNOTATIONS 1
+/*
+ * A test traffic generator that produces very long messages that are sent in
+ * chunks with a delay between each chunk.  This client can be used to simulate
+ * very large streaming messages and/or slow producers.
+ */
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -29,55 +33,59 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <math.h>
+#include <assert.h>
+#include <arpa/inet.h>
+#include <stdarg.h>
 
 
-#include "proton/reactor.h"
+#include "proton/proactor.h"
 #include "proton/message.h"
 #include "proton/connection.h"
 #include "proton/session.h"
 #include "proton/link.h"
 #include "proton/delivery.h"
+#include "proton/transport.h"
 #include "proton/event.h"
 #include "proton/handlers.h"
 
+#define DEFAULT_MAX_FRAME  16384
 #define BOOL2STR(b) ((b)?"true":"false")
+#define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 
 bool stop = false;
+bool verbose = false;
 
 uint64_t limit = 1;               // # messages to send
-uint64_t count = 0;               // # sent
+uint64_t sent = 0;                // # sent
 uint64_t acked = 0;               // # of received acks
 uint64_t accepted = 0;
 uint64_t not_accepted = 0;
 
-bool use_anonymous = false;       // use anonymous link if true
-bool presettle = false;           // true = send presettled
-uint32_t body_length = 65565;     // # bytes in vbin32 payload
+bool use_anonymous = false;  // use anonymous link if true
+bool presettle = false;      // true = send presettled
+uint32_t body_length = 1024 * 1024; // # bytes in vbin32 payload
+uint32_t pause_msec = 10;   // pause between sending chunks (milliseconds)
 
-// buffer for encoded message
-char *encode_buffer = NULL;
-size_t encode_buffer_size = 0;    // size of malloced memory
-size_t encoded_data_size = 0;     // length of encoded content
-
-char *target_address = "benchmark";
+char *target_address = "test-address";
 char *host_address = "127.0.0.1:5672";
-char *container_name = "BenchSender";
+char *container_name = "Clogger";
 
+//
+pn_proactor_t   *proactor;
 pn_connection_t *pn_conn;
-pn_session_t *pn_ssn;
-pn_link_t *pn_link;
-pn_reactor_t *reactor;
-
-pn_delivery_t *delivery;   // current in-flight delivery
-uint8_t out_data[1024];    // binary data for message payload (body data)
-uint32_t  byte_count;      // number of body data bytes written out link
-
+pn_session_t    *pn_ssn;
+pn_link_t       *pn_link;
+pn_delivery_t   *pn_dlv;       // current in-flight delivery
+uint32_t         bytes_sent;   // number of body data bytes written out link
+uint32_t         remote_max_frame = DEFAULT_MAX_FRAME;  // used to limit amount written
 
 #define AMQP_MSG_HEADER     0x70
 #define AMQP_MSG_PROPERTIES 0x73
 #define AMQP_MSG_DATA       0x75
 
-const uint8_t msg_header = {
+// minimal AMQP header for a message that contains a single binary value
+//
+const uint8_t msg_header[] = {
     0x00,  // begin described type
     0x53,  // 1 byte ulong type
     0x70,  // HEADER section
@@ -95,38 +103,15 @@ const uint8_t msg_header = {
 };
 
 
-bool send_message(pn_link_t *sender)
+void debug(const char *format, ...)
 {
-    static const uint8_t zero_block[1024] = {0};
-    static uint32_t bytes_sent = 0;
+    va_list args;
 
-    if (!delivery) {  // start a new delivery;
-        static long tag = 0;  // a simple tag generator
-        delivery = pn_delivery(sender,
-                               pn_dtag((const char *)&tag, sizeof(tag)));
-        ++tag;
+    if (!verbose) return;
 
-        // send the message header
-        ssize_t rc = pn_link_send(sender, msg_header, sizeof(msg_header));
-        assert(rc == sizeof(msg_header));
-
-        // add the vbin32 length (in network order!!!)
-        uint32_t len = htonl(body_length);
-        rc == pn_link_send(sender, &len, sizeof(len));
-        assert(rc == sizeof(len));
-    }
-
-    while (bytes_sent < body_length) {
-        uint32_t remaining = body_length - bytes_sent;
-        size_t len = (remaining < sizeof(zero_block)) ? remaining : sizeof(zero_block);
-        ssize_t rc = pn_link_send(sender, zero_block, len);
-        assert(rc >= 0);
-        bytes_sent += rc;
-        if (rc < len)
-            break;
-    }
-
-    return bytes_sent == body_length;  // true if done sending message
+    va_start(args, format);
+    vprintf(format, args);
+    va_end(args);
 }
 
 
@@ -139,7 +124,7 @@ static void signal_handler(int signum)
     case SIGINT:
     case SIGQUIT:
         stop = true;
-        if (reactor) pn_reactor_wakeup(reactor);
+        if (proactor) pn_proactor_interrupt(proactor);
         break;
     default:
         break;
@@ -147,93 +132,145 @@ static void signal_handler(int signum)
 }
 
 
-static void delete_handler(pn_handler_t *handler)
+void start_message()
 {
-    free(encode_buffer);
-    pn_message_free(out_message);
+    static long tag = 0;  // a simple tag generator
+
+    if (!pn_link || !pn_conn) return;
+    if (pn_dlv) {
+        debug("Cannot create delivery - in process\n");
+        abort();
+    }
+
+    debug("start message #%"PRIu64"!\n", sent);
+
+    pn_dlv = pn_delivery(pn_link, pn_dtag((const char *)&tag, sizeof(tag)));
+    ++tag;
+
+    bytes_sent = 0;
+
+    // send the message header
+    ssize_t rc = pn_link_send(pn_link, (const char *)msg_header, sizeof(msg_header));
+    assert(rc == sizeof(msg_header));
+
+    // add the vbin32 length (in network order!!!)
+    uint32_t len = htonl(body_length);
+    rc = pn_link_send(pn_link, (const char *)&len, sizeof(len));
+    assert(rc == sizeof(len));
 }
 
 
-/* Process each event posted by the reactor.
- */
-static void event_handler(pn_handler_t *handler,
-                          pn_event_t *event,
-                          pn_event_type_t type)
+/* return true when message transmit is complete */
+bool send_message_data()
 {
-    switch (type) {
+    static const char zero_block[DEFAULT_MAX_FRAME] = {0};
+
+    if (!pn_dlv) return true;  // not sending
+
+    if (bytes_sent < body_length) {
+
+        uint32_t amount = MIN(body_length - bytes_sent, remote_max_frame);
+        amount = MIN(amount, sizeof(zero_block));
+
+        ssize_t rc = pn_link_send(pn_link, zero_block, amount);
+        if (rc < 0) {
+            debug("Link send failed error=%ld\n", rc);
+            abort();
+        }
+        bytes_sent += rc;
+
+        debug("message body bytes written=%"PRIu32" total=%"PRIu32" body_length=%"PRIu32"\n",
+              rc, bytes_sent, body_length);
+    }
+
+    if (bytes_sent == body_length) {
+        debug("message #%"PRIu64" sent!\n", sent);
+        pn_link_advance(pn_link);
+        sent += 1;
+
+        if (presettle) {
+            pn_delivery_settle(pn_dlv);
+            if (limit && sent == limit) {
+                // no need to wait for acks
+                debug("stopping...\n");
+                stop = true;
+                pn_proactor_interrupt(proactor);
+            }
+        }
+        pn_dlv = 0;
+        return true;
+    }
+
+    return false;
+}
+
+/* Process each event posted by the proactor.
+   Return true if client has stopped.
+ */
+static bool event_handler(pn_event_t *event)
+{
+
+    const pn_event_type_t etype = pn_event_type(event);
+    debug("new event=%s\n", pn_event_type_name(etype));
+
+    switch (etype) {
 
     case PN_CONNECTION_INIT: {
         // Create and open all the endpoints needed to send a message
         //
         pn_connection_open(pn_conn);
-        pn_session_t *pn_ssn = pn_session(pn_conn);
+        pn_ssn = pn_session(pn_conn);
         pn_session_open(pn_ssn);
-        pn_link_t *pn_link = pn_sender(pn_ssn, "MySender");
+        pn_link = pn_sender(pn_ssn, "MyClogger");
         if (!use_anonymous) {
             pn_terminus_set_address(pn_link_target(pn_link), target_address);
         }
         pn_link_open(pn_link);
+    } break;
 
-        acked = count;
-        generate_message(now_usec());
 
+    case PN_CONNECTION_REMOTE_OPEN: {
+        uint32_t rmf = pn_transport_get_remote_max_frame(pn_event_transport(event));
+        remote_max_frame = (rmf != 0) ? rmf : DEFAULT_MAX_FRAME;
+        debug("Remote MAX FRAME=%u\n", remote_max_frame);
     } break;
 
     case PN_LINK_FLOW: {
         // the remote has given us some credit, now we can send messages
         //
-        pn_link_t *sender = pn_event_link(event);
-        int credit = pn_link_credit(sender);
-
-        while (credit > 0 && (limit == 0 || count < limit)) {
-            --credit;
-            ++count;
-            pn_delivery_t *delivery;
-
-            pn_link_send(sender, encode_buffer, encoded_data_size);
-            pn_link_advance(sender);
-
-            if (presettle) {
-                pn_delivery_settle(delivery);
-                if (limit && count == limit) {
-                    // no need to wait for acks
-                    stop = true;
-                    pn_reactor_wakeup(reactor);
+        if (limit == 0 || sent < limit) {
+            if (pn_link_credit(pn_link) > 0) {
+                if (!pn_dlv) {
+                    start_message();
+                    pn_proactor_set_timeout(proactor, pause_msec);   // send body after pause
                 }
             }
         }
     } break;
 
+
+    case PN_TRANSPORT: {
+        ssize_t pending = pn_transport_pending(pn_event_transport(event));
+        debug("PN_TRANSPORT pending=%ld\n", pending);
+    } break;
+
     case PN_DELIVERY: {
-        static long last_tag = -1;
         pn_delivery_t *dlv = pn_event_delivery(event);
         if (pn_delivery_updated(dlv)) {
             uint64_t rs = pn_delivery_remote_state(dlv);
-
-            pn_delivery_tag_t raw_tag = pn_delivery_tag(dlv);
-            long this_tag;
-            memcpy((char *)&this_tag, raw_tag.start, sizeof(this_tag));
+            pn_delivery_clear(dlv);
 
             switch (rs) {
             case PN_RECEIVED:
+                debug("PN_DELIVERY: received\n");
                 // This is not a terminal state - it is informational, and the
                 // peer is still processing the message.
                 break;
             case PN_ACCEPTED:
+                debug("PN_DELIVERY: accept\n");
                 ++acked;
                 ++accepted;
-
-                if (this_tag != last_tag + 1) {
-                    fprintf(stderr, "!!!!!!!!!!!!!!!!!!    UNEXPECTED TAG: 0x%lu (0x%lu)\n   !!!!!!!!!!!!!!!!!!!!",
-                            this_tag, last_tag + 1);
-                    exit(-1);
-                }
-                last_tag = this_tag;
-
                 pn_delivery_settle(dlv);
-                if (!ack_start_ts) {
-                    ack_start_ts = now_usec();
-                }
                 break;
             case PN_REJECTED:
             case PN_RELEASED:
@@ -242,22 +279,41 @@ static void event_handler(pn_handler_t *handler,
                 ++acked;
                 ++not_accepted;
                 pn_delivery_settle(dlv);
-                fprintf(stderr, "Message not accepted - code: 0x%lX\n", (unsigned long)rs);
+                debug("Message not accepted - code: 0x%lX\n", (unsigned long)rs);
                 break;
             }
 
             if (limit && acked == limit) {
                 // initiate clean shutdown of the endpoints
+                debug("stopping...\n");
                 stop = true;
-                ack_stop_ts = now_usec();
-                pn_reactor_wakeup(reactor);
+                pn_proactor_interrupt(proactor);
             }
         }
+    } break;
+
+    case PN_PROACTOR_TIMEOUT: {
+        if (!send_message_data()) {   // not done sending
+            pn_proactor_set_timeout(proactor, pause_msec);
+        } else if (limit == 0 || sent < limit) {
+            if (pn_link_credit(pn_link) > 0) {
+                // send next message
+                start_message();
+                pn_proactor_set_timeout(proactor, pause_msec);
+            }
+        }
+    } break;
+
+    case PN_PROACTOR_INACTIVE: {
+        debug("proactor inactive!\n");
+        return stop;
     } break;
 
     default:
         break;
     }
+
+    return false;
 }
 
 static void usage(void)
@@ -266,43 +322,41 @@ static void usage(void)
   printf("-a      \tThe host address [%s]\n", host_address);
   printf("-c      \t# of messages to send, 0 == nonstop [%"PRIu64"]\n", limit);
   printf("-i      \tContainer name [%s]\n", container_name);
-  printf("-l      \tAdd timestamp [%s]\n", BOOL2STR(add_timestamp));
   printf("-n      \tUse an anonymous link [%s]\n", BOOL2STR(use_anonymous));
-  printf("-s      \tBody size in bytes [%d]\n", body_size);
+  printf("-s      \tBody size in bytes [%d]\n", body_length);
   printf("-t      \tTarget address [%s]\n", target_address);
   printf("-u      \tSend all messages presettled [%s]\n", BOOL2STR(presettle));
-  printf("-v      \tPrint periodic status messages [off]\n");
-  printf("-M      \tAdd dummy Message Annotations section [off]\n");
+  printf("-D      \tPrint debug info [off]\n");
+  printf("-P      \tPause between sending frames [%"PRIu32"]\n", pause_msec);
   exit(1);
 }
 
 int main(int argc, char** argv)
 {
-    int64_t  print_deadline = 0;
-
     /* command line options */
     opterr = 0;
     int c;
-    while ((c = getopt(argc, argv, "ha:c:i:lns:t:uvM")) != -1) {
+    while ((c = getopt(argc, argv, "ha:c:i:ns:t:uDP:")) != -1) {
         switch(c) {
         case 'h': usage(); break;
         case 'a': host_address = optarg; break;
         case 'c':
-            if (sscanf(optarg, "%"PRIu64, &limit) != 1)
+            if (sscanf(optarg, "%"SCNu64, &limit) != 1)
                 usage();
             break;
         case 'i': container_name = optarg; break;
-        case 'l': add_timestamp = true; break;
         case 'n': use_anonymous = true; break;
         case 's':
-            if (sscanf(optarg, "%"PRIu32, &body_size) != 1)
+            if (sscanf(optarg, "%"SCNu32, &body_length) != 1)
                 usage();
             break;
         case 't': target_address = optarg; break;
         case 'u': presettle = true; break;
-        case 'v': print_deadline = now_usec() + (10 * USECS_PER_SECOND); break;
-        case 'M': add_annotations = true; break;
-
+        case 'D': verbose = true; break;
+        case 'P':
+            if (sscanf(optarg, "%"SCNu32, &pause_msec) != 1)
+                usage();
+            break;
         default:
             usage();
             break;
@@ -312,81 +366,49 @@ int main(int argc, char** argv)
     signal(SIGQUIT, signal_handler);
     signal(SIGINT,  signal_handler);
 
-    pn_handler_t *handler = pn_handler_new(event_handler, 0, delete_handler);
-    pn_handler_add(handler, pn_handshaker());
-
-    reactor = pn_reactor();
-    pn_conn = pn_reactor_connection(reactor, handler);
-
+    pn_conn = pn_connection();
     // the container name should be unique for each client
     pn_connection_set_container(pn_conn, container_name);
     pn_connection_set_hostname(pn_conn, host_address);
+    proactor = pn_proactor();
+    pn_proactor_connect(proactor, pn_conn, host_address);
 
-    // wait up to 10 seconds for activity before returning from
-    // pn_reactor_process()
-    pn_reactor_set_timeout(reactor, 10000);
+    bool done = false;
+    while (!done) {
+        pn_event_batch_t *events = pn_proactor_wait(proactor);
+        pn_event_t *event = pn_event_batch_next(events);
+        while (event) {
+            done = event_handler(event);
+            if (done)
+                break;
 
-    pn_reactor_start(reactor);
+            event = pn_event_batch_next(events);
+        }
 
-    bool printed = false;
-    while (pn_reactor_process(reactor)) {
+        pn_proactor_done(proactor, events);
+
         if (stop) {
-            if (!printed && count) {
-                int64_t now = now_usec();
-                double duration = (double)(now - start_ts) / 1000000.0;
-                if (duration == 0.0) duration = 0.0010;  // zero divide hack
-                printf("  %.3f: msgs sent=%"PRIu64" msgs/sec=%12.3f\n",
-                       duration, count, (double)count/duration);
-                printed = true;
-            }
-
             // close the endpoints this will cause pn_reactor_process() to
             // eventually break the loop
+            if (pn_link || pn_ssn || pn_conn)
+                debug("stopping connection...\n");
             if (pn_link) pn_link_close(pn_link);
-            if (pn_ssn) pn_session_close(pn_ssn);
-            pn_connection_close(pn_conn);
-        } else if (print_deadline && now_usec() >= print_deadline) {
-            printf("  -> sent: %"PRIu64" acked: %"PRIu64"  (%"PRIu64" accepted) capacity: %d\n",
-                   count, acked, accepted, pn_link_credit(pn_link));
-            print_deadline = now_usec() + (10 * USECS_PER_SECOND);
+            if (pn_ssn)  pn_session_close(pn_ssn);
+            if (pn_conn) pn_connection_close(pn_conn);
+            pn_link = 0;
+            pn_ssn = 0;
+            pn_conn = 0;
         }
     }
-
-    if (stall_count) {
-        uint64_t imean = total_stall / stall_count;
-        uint64_t isos = sum_of_squares / stall_count;
-        isos = isos - (imean * imean);
-        double std_dev = sqrt((double)isos);
-        printf("\n%d credit stalls occurred\n", stall_count);
-        printf("   Avg stall %.3f msec Max %.3f msec (std dev %.3f msec)\n",
-               (double)imean / 1000.0,
-               (double)worse_stall / 1000.0,
-               (double)std_dev / 1000.0);
-    }
-
-    if (grant_count) {
-        printf("  Avg credit grant: %.3f credits (%d grants total)\n",
-               (double)credit_grants / (double)grant_count,
-               grant_count);
-    }
+    debug("Send complete!\n");
+    pn_proactor_free(proactor);
 
     if (not_accepted) {
-        printf("Sent: %ld  Accepted: %ld Not Accepted: %ld\n", count, accepted, not_accepted);
-        if (accepted + not_accepted != count) {
-            printf("FAILURE! Sent: %ld  Acked: %ld\n", count, accepted + not_accepted);
+        printf("Sent: %ld  Accepted: %ld Not Accepted: %ld\n", sent, accepted, not_accepted);
+        if (accepted + not_accepted != sent) {
+            printf("FAILURE! Sent: %ld  Acked: %ld\n", sent, accepted + not_accepted);
+            return 1;
         }
     }
-    
-    printf("  Start tx  -> stop tx:   %.3f msec\n"
-           "  Start ack -> stop ack:  %.3f msec\n"
-           "  Start tx  -> start ack: %.3f msec\n"
-           "  Stop tx   -> stop ack:  %.3f msec\n"
-           "  Start tx  -> stop ack:  %.3f msec\n",
-           (stop_ts - start_ts) / 1000.0,
-           (ack_stop_ts - ack_start_ts) / 1000.0,
-           (ack_start_ts - start_ts) / 1000.0,
-           (ack_stop_ts - stop_ts) / 1000.0,
-           (ack_stop_ts - start_ts) / 1000.0);
-
     return 0;
 }
