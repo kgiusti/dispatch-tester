@@ -1,0 +1,117 @@
+#!/bin/bash
+
+#
+# Expects test-sender and test-receiver are in your path.
+# These tools are available in the tests subdir of the build directory
+# of the qpid-dispatch git repo.
+
+if [[ $# != 1 ]]; then
+    echo "usage $0 <router-address:port>"
+    exit 1
+fi
+
+set -x
+
+ROUTER=$1
+
+# these receive forever
+test-receiver -c 0 -a $ROUTER &
+test-receiver -c 0 -a $ROUTER &
+
+while true; do
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 100 -sm -a $ROUTER &
+    test-receiver -c 3 -a $ROUTER &
+    test-sender -c 100 -sl -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-receiver -c 7 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 100 -sm -a $ROUTER &
+    test-sender -c 100 -sl -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-receiver -c 500 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 100 -sm -a $ROUTER &
+    test-sender -c 100 -sl -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 100 -sm -a $ROUTER &
+    test-sender -c 100 -sl -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 100 -sm -a $ROUTER &
+    test-sender -c 100 -sl -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 100 -sm -a $ROUTER &
+    test-sender -c 100 -sl -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-sender -c 1000 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-receiver -c 1 -a $ROUTER &
+    test-sender -c 1 -a $ROUTER &
+    test-sender -c 2000 -sx -a $ROUTER
+done
+
