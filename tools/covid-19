@@ -5,113 +5,141 @@
 # These tools are available in the tests subdir of the build directory
 # of the qpid-dispatch git repo.
 
-if [[ $# != 1 ]]; then
-    echo "usage $0 <router-address:port>"
+function usage {
+    echo "Usage: $0 [-a <router-address:port>] [-t <target-address>]"
     exit 1
-fi
+}
+
+ROUTER="127.0.0.1:5672"
+TARGET="test-address"
+
+
+while getopts ":a:t:" opt; do
+    case $opt in
+        a) ROUTER=$OPTARG ;;
+        t) TARGET=$OPTARG ;;
+        *) usage ;;
+    esac
+done
 
 set -x
 
-ROUTER=$1
+function spawn_sender {
+    test-sender -a $ROUTER -t $TARGET $@ &
+    WAIT_PIDS+="$! "
+}
 
-# these receive forever
-test-receiver -c 0 -a $ROUTER &
-test-receiver -c 0 -a $ROUTER &
+function spawn_receiver {
+    test-receiver -a $ROUTER -s $TARGET $@ &
+    WAIT_PIDS+="$! "
+}
+
+
+
+# these receive forever, guarantee $TARGET has subscribers
+WAIT_PIDS=
+spawn_receiver -c 0
+spawn_receiver -c 0
 
 while true; do
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 100 -sm -a $ROUTER &
-    test-receiver -c 3 -a $ROUTER &
-    test-sender -c 100 -sl -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-receiver -c 7 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 100 -sm -a $ROUTER &
-    test-sender -c 100 -sl -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-receiver -c 500 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 100 -sm -a $ROUTER &
-    test-sender -c 100 -sl -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 100 -sm -a $ROUTER &
-    test-sender -c 100 -sl -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 100 -sm -a $ROUTER &
-    test-sender -c 100 -sl -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 100 -sm -a $ROUTER &
-    test-sender -c 100 -sl -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-sender -c 1000 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-receiver -c 1 -a $ROUTER &
-    test-sender -c 1 -a $ROUTER &
-    test-sender -c 2000 -sx -a $ROUTER
+    WAIT_PIDS=
+    spawn_sender   -c 100   -sx
+    spawn_receiver -c 1
+    spawn_sender   -c 1000  -n
+    spawn_sender   -c 1000  -u
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_sender   -c 100   -sm
+    spawn_receiver -c 3
+    spawn_sender   -c 100   -sl
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_receiver -c 7
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_sender   -c 100   -sm
+    spawn_sender   -c 100   -sl
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_receiver -c 500
+    spawn_sender   -c 1000
+    spawn_sender   -c 100   -sm
+    spawn_sender   -c 100   -sl
+    spawn_receiver -c 1
+    spawn_receiver -c 1     -E
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_sender   -c 100   -sm
+    spawn_sender   -c 100   -sl
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_sender   -c 100   -sm
+    spawn_sender   -c 100   -sl
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_sender   -c 100   -sm
+    spawn_sender   -c 100   -sl
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_sender   -c 1000
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1    -E
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1  -u
+    spawn_receiver -c 1
+    spawn_sender   -c 1  -n
+    spawn_receiver -c 1
+    spawn_sender   -c 1  -u -E
+    spawn_receiver -c 1
+    spawn_sender   -c 1  -n -E
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1  -w 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_receiver -c 1
+    spawn_sender   -c 1
+    spawn_sender   -c 2000 -sx
+    spawn_receiver -c 300  -w 1 -E
+    echo "WAIT_PIDS=[$WAIT_PIDS]"
+    wait $WAIT_PIDS
 done
 
