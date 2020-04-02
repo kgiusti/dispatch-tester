@@ -64,7 +64,7 @@ uint64_t not_accepted = 0;
 bool use_anonymous = false;  // use anonymous link if true
 bool presettle = false;      // true = send presettled
 uint32_t body_length = 1024 * 1024; // # bytes in vbin32 payload
-uint32_t pause_msec = 10;   // pause between sending chunks (milliseconds)
+uint32_t pause_msec = 100;   // pause between sending chunks (milliseconds)
 
 char *target_address = "test-address";
 char *host_address = "127.0.0.1:5672";
