@@ -48,7 +48,7 @@
 #include "proton/event.h"
 #include "proton/handlers.h"
 
-#define DEFAULT_MAX_FRAME  16384
+#define DEFAULT_MAX_FRAME  65535
 #define BOOL2STR(b) ((b)?"true":"false")
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 
@@ -66,9 +66,9 @@ bool presettle = false;      // true = send presettled
 uint32_t body_length = 1024 * 1024; // # bytes in vbin32 payload
 uint32_t pause_msec = 100;   // pause between sending chunks (milliseconds)
 
-char *target_address = "test-address";
-char *host_address = "127.0.0.1:5672";
-char *container_name = "Clogger";
+const char *target_address = "test-address";
+const char *host_address = "127.0.0.1:5672";
+const char *container_name = "Clogger";
 
 //
 pn_proactor_t   *proactor;
@@ -316,19 +316,19 @@ static bool event_handler(pn_event_t *event)
     return false;
 }
 
-static void usage(void)
+static void usage(const char *prog)
 {
-  printf("Usage: sender <options>\n");
-  printf("-a      \tThe host address [%s]\n", host_address);
-  printf("-c      \t# of messages to send, 0 == nonstop [%"PRIu64"]\n", limit);
-  printf("-i      \tContainer name [%s]\n", container_name);
-  printf("-n      \tUse an anonymous link [%s]\n", BOOL2STR(use_anonymous));
-  printf("-s      \tBody size in bytes [%d]\n", body_length);
-  printf("-t      \tTarget address [%s]\n", target_address);
-  printf("-u      \tSend all messages presettled [%s]\n", BOOL2STR(presettle));
-  printf("-D      \tPrint debug info [off]\n");
-  printf("-P      \tPause between sending frames [%"PRIu32"]\n", pause_msec);
-  exit(1);
+    printf("Usage: %s <options>\n", prog);
+    printf("-a      \tThe host address [%s]\n", host_address);
+    printf("-c      \t# of messages to send, 0 == nonstop [%"PRIu64"]\n", limit);
+    printf("-i      \tContainer name [%s]\n", container_name);
+    printf("-n      \tUse an anonymous link [%s]\n", BOOL2STR(use_anonymous));
+    printf("-s      \tBody size in bytes [%d]\n", body_length);
+    printf("-t      \tTarget address [%s]\n", target_address);
+    printf("-u      \tSend all messages presettled [%s]\n", BOOL2STR(presettle));
+    printf("-D      \tPrint debug info [off]\n");
+    printf("-P      \tPause between sending frames [%"PRIu32"]\n", pause_msec);
+    exit(1);
 }
 
 int main(int argc, char** argv)
@@ -338,27 +338,27 @@ int main(int argc, char** argv)
     int c;
     while ((c = getopt(argc, argv, "ha:c:i:ns:t:uDP:")) != -1) {
         switch(c) {
-        case 'h': usage(); break;
+        case 'h': usage(argv[0]); break;
         case 'a': host_address = optarg; break;
         case 'c':
             if (sscanf(optarg, "%"SCNu64, &limit) != 1)
-                usage();
+                usage(argv[0]);
             break;
         case 'i': container_name = optarg; break;
         case 'n': use_anonymous = true; break;
         case 's':
             if (sscanf(optarg, "%"SCNu32, &body_length) != 1)
-                usage();
+                usage(argv[0]);
             break;
         case 't': target_address = optarg; break;
         case 'u': presettle = true; break;
         case 'D': verbose = true; break;
         case 'P':
             if (sscanf(optarg, "%"SCNu32, &pause_msec) != 1)
-                usage();
+                usage(argv[0]);
             break;
         default:
-            usage();
+            usage(argv[0]);
             break;
         }
     }

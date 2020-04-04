@@ -11,6 +11,11 @@ To run the tests:
 can control the URL and the branch/tag/SHA1 used to check out dispatch
 and the proton sources - see set-up.sh for details.
 
+Example: run latest qdrouter master against previous versions of
+qdrouterd and proton:
+
+  ./set-up.sh -p 0.30.0 -d master -P 0.29.0 -D 1.10.0 
+
 1) Once the routers have come up, create a python virtual environment
 using virtualenv.  Activate the environment, and install pyngus,
 oslo.messaging, and ombt packages.  Example:
