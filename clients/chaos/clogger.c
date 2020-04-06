@@ -293,6 +293,10 @@ static bool event_handler(pn_event_t *event)
     } break;
 
     case PN_PROACTOR_TIMEOUT: {
+        if (pn_conn) pn_connection_wake(pn_conn);
+    } break;
+
+    case PN_CONNECTION_WAKE: {
         if (!send_message_data()) {   // not done sending
             pn_proactor_set_timeout(proactor, pause_msec);
         } else if (limit == 0 || sent < limit) {
