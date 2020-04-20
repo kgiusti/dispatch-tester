@@ -1,5 +1,9 @@
 *-log.txt
 clients/chaos/clogger
+benchmarks/clients/src/latency-sender
+benchmarks/clients/src/latency-receiver
+benchmarks/clients/src/throughput-sender
+benchmarks/clients/src/throughput-receiver
 benchmarks/clients/src/blocking-sender
 benchmarks/clients/src/receiver
 benchmarks/clients/src/sender

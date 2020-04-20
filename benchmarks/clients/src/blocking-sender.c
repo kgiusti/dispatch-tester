@@ -405,8 +405,9 @@ static void event_handler(pn_handler_t *handler,
             }
 
             if (!limit || count < limit) {
-                // send next message
-                send_msg(pn_event_link(event));
+                if (!pending_ack)
+                    // send next message
+                    send_msg(pn_event_link(event));
             } else if (acked == limit) {
                 // initiate clean shutdown of the endpoints
                 stop = true;

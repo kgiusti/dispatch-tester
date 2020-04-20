@@ -37,21 +37,20 @@
 #include "proton/event.h"
 #include "proton/handlers.h"
 
+/* Message latency receiver for use with latency-sender */
 
-#define MAX_SIZE (1024 * 64)
+#define MAX_SIZE (1048576 * 2)  // large enough to buffer max message from latency-sender
 char in_buffer[MAX_SIZE];
 
 bool stop = false;
 
-int64_t min_latency = INT64_MAX;
-int64_t max_latency = 0;
-int64_t total_latency = 0;
-int64_t sum_of_squares = 0;
-int64_t start_ts;  // start timestamp
-int latency_count;
+uint64_t min_latency = UINT64_MAX;
+uint64_t max_latency = 0;
+uint64_t total_latency = 0;
+uint64_t sum_of_squares = 0;
+uint64_t start_ts;  // start timestamp
 
 int  credit_window = 1000;
-bool check_latency = false;  // check for timestamp (compute latency)
 char *source_address = "benchmark";  // name of the source node to receive from
 char *host_address = "127.0.0.1:5672";
 char *container_name = "BenchReceiver";
@@ -71,7 +70,7 @@ uint64_t limit = 0;   // if > 0 stop after limit messages arrive
 
 // return wallclock time in microseconds since Epoch
 //
-static int64_t now_usec(void)
+static uint64_t now_usec(void)
 {
     struct timespec ts;
     int rc = clock_gettime(CLOCK_REALTIME, &ts);
@@ -80,7 +79,7 @@ static int64_t now_usec(void)
         exit(errno);
     }
 
-    return (USECS_PER_SECOND * (int64_t)ts.tv_sec) + (ts.tv_nsec / 1000);
+    return (USECS_PER_SECOND * (uint64_t)ts.tv_sec) + (ts.tv_nsec / 1000);
 }
 
 
@@ -142,39 +141,76 @@ static void event_handler(pn_handler_t *handler,
         pn_delivery_t *dlv = pn_event_delivery(event);
         if (pn_delivery_readable(dlv) && !pn_delivery_partial(dlv)) {
             // A full message has arrived
-            if (!start_ts) start_ts = now_usec();
+            uint64_t in_ts = now_usec();
             count += 1;
-            if (check_latency && pn_delivery_pending(dlv) < MAX_SIZE) {
-                // try to decode the message to get at the timestamp
-                size_t len = pn_link_recv(pn_delivery_link(dlv), in_buffer, MAX_SIZE);
-                if (len > 0) {
-                    pn_message_clear(in_message);
-                    // decode the raw data into the message instance
-                    if (pn_message_decode(in_message, in_buffer, len) == PN_OK) {
-                        pn_data_t *body = pn_message_body(in_message);
-                        pn_data_rewind(body);
-                        if (pn_data_next(body)) {
-                            // expect a list, first element long usec transmit timestamp
-                            if (pn_data_get_list(body) >= 2) {
-                                pn_data_enter(body);
-                                pn_data_next(body);
-
-                                if (pn_data_type(body) == PN_LONG) {
-                                    int64_t latency = now_usec() - pn_data_get_long(body);
-                                    if (latency < min_latency) min_latency = latency;
-                                    if (latency > max_latency) max_latency = latency;
-                                    total_latency += latency;
-                                    sum_of_squares += (latency * latency);
-                                    latency_count += 1;
-                                }
-                            }
-                        }
-                    }
-                }
+            if (pn_delivery_pending(dlv) > MAX_SIZE) {
+                fprintf(stderr,
+                        "Error: unable to buffer incoming message - to large! (max=%d bytes)\n",
+                        MAX_SIZE);
+                exit(-1);
             }
 
+            char *ptr = &in_buffer[0];
+            size_t avail = MAX_SIZE;
+            ssize_t len;
+
+            do {
+                len = pn_link_recv(pn_delivery_link(dlv), ptr, avail);
+                if (len > 0) {
+                    ptr += len;
+                    avail -= len;
+                }
+            } while (len > 0);
+
+            if (len != PN_EOS) {
+                fprintf(stderr,
+                        "Error: pn_link_recv() failed, error: %zd\n",
+                        len);
+                exit(-1);
+            }
+
+            // now that the data has been read we can settle.  We want to do
+            // this asap as the sender is waiting for the accept (and running a timer!)
             pn_delivery_update(dlv, PN_ACCEPTED);
             pn_delivery_settle(dlv);  // dlv is now freed
+
+            // decode the raw data into the message instance
+            pn_message_clear(in_message);
+            int rc = pn_message_decode(in_message, in_buffer, MAX_SIZE - avail);
+            if (rc != PN_OK) {
+                fprintf(stderr,
+                        "Error: pn_message_decode() failed, error: %d\n",
+                        rc);
+                exit(-1);
+            }
+
+            // extract the sender's timestamp
+            // note: see latency-sender.c for the format of the message body
+            pn_data_t *body = pn_message_body(in_message);
+            pn_data_rewind(body);
+            if (!pn_data_next(body) ||
+                pn_data_get_list(body) < 1 ||
+                !pn_data_enter(body) ||
+                !pn_data_next(body) ||
+                pn_data_type(body) != PN_ULONG) {
+
+                fprintf(stderr,
+                        "Error: cannot parse message body - invalid format\n");
+                exit(-1);
+            }
+
+            uint64_t send_ts = pn_data_get_ulong(body);
+            if (send_ts == 0 || send_ts > in_ts) {
+                fprintf(stderr,
+                        "Error: invalid transmit timestamp (clocks not synchronized?)\n");
+                exit(-1);
+            }
+
+            uint64_t latency = in_ts - send_ts;
+            if (latency < min_latency) min_latency = latency;
+            if (latency > max_latency) max_latency = latency;
+            total_latency += latency;
+            sum_of_squares += (latency * latency);
 
             if (limit && count == limit) {
                 stop = true;
@@ -205,18 +241,14 @@ static void usage(void)
   printf("-a      \tThe host address [%s]\n", host_address);
   printf("-c      \tExit after N messages arrive (0 == run forever) [%"PRIu64"]\n", limit);
   printf("-i      \tContainer name [%s]\n", container_name);
-  printf("-l      \tCheck for timestamp [%s]\n", (check_latency) ? "yes" : "no");
   printf("-s      \tSource address [%s]\n", source_address);
   printf("-w      \tCredit window [%d]\n", credit_window);
-  printf("-v      \tPrint periodic status messages [off]\n");
   exit(1);
 }
 
 
 int main(int argc, char** argv)
 {
-    int64_t print_deadline = 0;
-
     /* create a handler for the connection's events.
      */
     pn_handler_t *handler = pn_handler_new(event_handler, 0, delete_handler);
@@ -225,7 +257,7 @@ int main(int argc, char** argv)
     /* command line options */
     opterr = 0;
     int c;
-    while((c = getopt(argc, argv, "i:a:s:hlw:c:v")) != -1) {
+    while((c = getopt(argc, argv, "i:a:s:hw:c:")) != -1) {
         switch(c) {
         case 'h': usage(); break;
         case 'a': host_address = optarg; break;
@@ -234,13 +266,11 @@ int main(int argc, char** argv)
                 usage();
             break;
         case 'i': container_name = optarg; break;
-        case 'l': check_latency = true; break;
         case 's': source_address = optarg; break;
         case 'w':
             if (sscanf(optarg, "%d", &credit_window) != 1 || credit_window <= 0)
                 usage();
             break;
-        case 'v': print_deadline = now_usec() + (10 * USECS_PER_SECOND); break;
 
         default:
             usage();
@@ -263,37 +293,25 @@ int main(int argc, char** argv)
 
     pn_reactor_start(reactor);
 
-    bool printed = false;
     while (pn_reactor_process(reactor)) {
         if (stop) {
-            int64_t now = now_usec();
-            double duration = (double)(now - start_ts) / (double)USECS_PER_SECOND;
-            if (duration == 0.0) duration = 0.0010;  // zero divide hack
-
-            if (!printed && count) {
-                printf("  %.3f: msgs recv=%"PRIu64" msgs/sec=%12.3f\n",
-                       duration, count, (double)count/duration);
-                printed = true;
-            }
-
             // close the endpoints this will cause pn_reactor_process() to
             // eventually break the loop
             if (pn_link) pn_link_close(pn_link);
             if (pn_ssn) pn_session_close(pn_ssn);
             pn_connection_close(pn_conn);
-        } else if (print_deadline && now_usec() >= print_deadline) {
-            printf("  -> received: %"PRIu64" (accepted) capacity: %d\n", count, pn_link_credit(pn_link));
-            print_deadline = now_usec() + (10 * USECS_PER_SECOND);
         }
     }
 
-    if (latency_count) {
-        int64_t lmean = total_latency / latency_count;
-        int64_t isos = sum_of_squares / latency_count;
+
+    fprintf(stdout, "RX: Received: %"PRIu64" messages\n", count);
+    if (count) {
+        uint64_t lmean = total_latency / count;
+        uint64_t isos = sum_of_squares / count;
         isos = isos - (lmean * lmean);
         double std_dev = sqrt((double)isos);
-        printf("\nLatency:\n");
-        printf("   Avg %.3f msec Max %.3f msec Min %.3f msec (std dev %.3f msec)\n",
+        fprintf(stdout,
+                "RX:  Latency:  Avg %.3f msec Max %.3f msec Min %.3f msec (std dev %.3f msec)\n",
                (double)lmean / 1000.0,
                (double)max_latency / 1000.0,
                (double)min_latency / 1000.0,

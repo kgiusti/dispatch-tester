@@ -357,14 +357,14 @@ static void event_handler(pn_handler_t *handler,
     } break;
 
     case PN_DELIVERY: {
-        static long last_tag = -1;
+        //static long last_tag = -1;
         pn_delivery_t *dlv = pn_event_delivery(event);
         if (pn_delivery_updated(dlv)) {
             uint64_t rs = pn_delivery_remote_state(dlv);
 
-            pn_delivery_tag_t raw_tag = pn_delivery_tag(dlv);
-            long this_tag;
-            memcpy((char *)&this_tag, raw_tag.start, sizeof(this_tag));
+            //pn_delivery_tag_t raw_tag = pn_delivery_tag(dlv);
+            //long this_tag;
+            //memcpy((char *)&this_tag, raw_tag.start, sizeof(this_tag));
 
             switch (rs) {
             case PN_RECEIVED:
@@ -375,12 +375,12 @@ static void event_handler(pn_handler_t *handler,
                 ++acked;
                 ++accepted;
 
-                if (this_tag != last_tag + 1) {
-                    fprintf(stderr, "!!!!!!!!!!!!!!!!!!    UNEXPECTED TAG: 0x%lu (0x%lu)\n   !!!!!!!!!!!!!!!!!!!!",
-                            this_tag, last_tag + 1);
-                    exit(-1);
-                }
-                last_tag = this_tag;
+                // if (this_tag != last_tag + 1) {
+                //    fprintf(stderr, "!!!!!!!!!!!!!!!!!!    UNEXPECTED TAG: 0x%lx (0x%lx)   !!!!!!!!!!!!!!!!!!!!\n",
+                //            this_tag, last_tag + 1);
+                //    exit(-1);
+                //}
+                //last_tag = this_tag;
 
                 pn_delivery_settle(dlv);
                 if (!ack_start_ts) {
