@@ -39,7 +39,7 @@ for QDRPID in $ROUTERPIDS; do
         while read tid
         do
             # perf record -F max --call-graph=lbr --per-thread -s --tid=$tid --output=qdr_perf_${QDRPID}_${tid}.pdata &
-            perf record -F 99 --call-graph=dwarf --per-thread -s --tid=$tid --output=qdr_perf_${QDRPID}_${tid}.pdata &
+            perf record -F 1000 --call-graph=dwarf --per-thread -s --tid=$tid --output=qdr_perf_${QDRPID}_${tid}.pdata &
             echo "Started perf for thread ${tid} in process $QDRPID"
         done
 done
