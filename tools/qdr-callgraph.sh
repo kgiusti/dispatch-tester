@@ -10,11 +10,15 @@
 #
 # 1) setup the qdrouterd configuration - start all routers
 # 2) prepare to start whatever traffic/test
-# 3) run qdr-flamegraph.sh
+# 3) run qdr-callgraph.sh
 # 4) execute the test scenario
 # 5) press <ENTER> to finish collection
 #
 # outputs a flamegraph for each thread
+#
+# Dependencies: on fedora 31:
+#  dnf install perf flamegraph-stackcollapse-perf flamegraph
+#
 
 ## for older intel CPUs that do not support --call-graph=lbr you must use -fno-omit-frame-pointer
 ## Example:
