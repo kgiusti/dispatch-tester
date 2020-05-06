@@ -5,7 +5,7 @@
 # These tools are available in the tests subdir of the build directory
 # of the qpid-dispatch git repo.
 
-set -x
+#set -x
 
 ROUTER_A="127.0.0.1:8888"
 ROUTER_B="127.0.0.1:9999"
@@ -28,6 +28,7 @@ function spawn_receiver {
 
 for (( X=0 ; $X < 1000 ; X+=1 )); do
 
+    echo "Starting cycle $X of 1000..."
 
     RECEIVER_PIDS=
     spawn_receiver -c 0 -s multicast/test -a $ROUTER_A
@@ -161,13 +162,14 @@ for (( X=0 ; $X < 1000 ; X+=1 )); do
 
     
 
-    echo "SENDER_PIDS=[$SENDER_PIDS]"
+    #echo "SENDER_PIDS=[$SENDER_PIDS]"
+    echo "Waiting for children to exit..."
     wait $SENDER_PIDS
 
     kill $RECEIVER_PIDS
     wait $RECEIVER_PIDS
 done
-set +x
+#set +x
 
 qdstat -g -b $ROUTER_A >  qdstat-RouterA.txt
 qdstat -l -b $ROUTER_A >> qdstat-RouterA.txt
