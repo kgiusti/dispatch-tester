@@ -27,7 +27,7 @@ while getopts "p:d:P:D:u:U:" opt; do
             ;;
         ?)
             echo $usage
-            return 1
+            exit 1
             ;;
     esac
 done
