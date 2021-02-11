@@ -25,10 +25,13 @@ function spawn_receiver {
 }
 
 
+MAX_CYCLES=20
 
-for (( X=0 ; $X < 1000 ; X+=1 )); do
+for (( X=0 ; $X < $MAX_CYCLES ; X+=1 )); do
 
-    echo "Starting cycle $X of 1000..."
+    echo "Starting cycle $X of $MAX_CYCLES..."
+    echo "?" > RouterA.log
+    echo "?" > RouterB.log
 
     RECEIVER_PIDS=
     spawn_receiver -c 0 -s multicast/test -a $ROUTER_A
@@ -44,6 +47,7 @@ for (( X=0 ; $X < 1000 ; X+=1 )); do
     spawn_receiver -c 0 -s linkroute.test -a $ROUTER_A
     spawn_receiver -c 0 -s linkroute.test -a $ROUTER_B
 
+    echo "Receivers spawned..."
     sleep 3
 
     SENDER_PIDS=
@@ -54,10 +58,18 @@ for (( X=0 ; $X < 1000 ; X+=1 )); do
     # spawn_sender -c 4000   -sl -t queue.01       -a $ROUTER_B
     # spawn_sender -c 5000   -sm -t linkroute/test -a $ROUTER_B
 
-    spawn_sender -c 1000   -sx -t multicast/test -a $ROUTER_A
+    
+    spawn_sender -c 500    -sx -t multicast/test -a $ROUTER_B
+    spawn_sender -c 10000  -sm -t closest/test   -a $ROUTER_B
+    spawn_sender -c 5000   -sl -t balanced/test  -a $ROUTER_B
+    spawn_sender -c 9000   -ss -t topic.01       -a $ROUTER_B
+    spawn_sender -c 4000   -sl -t queue.01       -a $ROUTER_B
+    spawn_sender -c 5000   -sm -t linkroute.test -a $ROUTER_B
+
+    spawn_sender -c 500    -sx -t multicast/test -a $ROUTER_A
     spawn_sender -c 10000  -sm -t closest/test   -a $ROUTER_A
     spawn_sender -c 5000   -sl -t balanced/test  -a $ROUTER_A
-    spawn_sender -c 90000  -ss -t topic.01       -a $ROUTER_A
+    spawn_sender -c 9000   -ss -t topic.01       -a $ROUTER_A
     spawn_sender -c 4000   -sl -t queue.01       -a $ROUTER_A
     spawn_sender -c 5000   -sm -t linkroute.test -a $ROUTER_A
 
@@ -152,24 +164,23 @@ for (( X=0 ; $X < 1000 ; X+=1 )); do
     spawn_sender -c 1 -sl -t queue.01        -a $ROUTER_A  -p 2
     spawn_sender -c 1 -sm -t linkroute.test  -a $ROUTER_A  -p 3
 
-    
-    spawn_sender -c 1000   -sx -t multicast/test -a $ROUTER_B
-    spawn_sender -c 10000  -sm -t closest/test   -a $ROUTER_B
-    spawn_sender -c 5000   -sl -t balanced/test  -a $ROUTER_B
-    spawn_sender -c 90000  -ss -t topic.01       -a $ROUTER_B
-    spawn_sender -c 4000   -sl -t queue.01       -a $ROUTER_B
-    spawn_sender -c 5000   -sm -t linkroute.test -a $ROUTER_B
 
     
 
+    echo "Waiting for senders to exit..."
     #echo "SENDER_PIDS=[$SENDER_PIDS]"
-    echo "Waiting for children to exit..."
     wait $SENDER_PIDS
 
+    sleep 2
+    echo "Waiting for receivers to exit..."
+    sleep 2
+    #echo "RECEIVER_PIDS=[$RECEIVER_PIDS]"
     kill $RECEIVER_PIDS
     wait $RECEIVER_PIDS
 done
 #set +x
+
+echo "TEST COMPLETE!"
 
 qdstat -g -b $ROUTER_A >  qdstat-RouterA.txt
 qdstat -l -b $ROUTER_A >> qdstat-RouterA.txt
