@@ -1,0 +1,95 @@
+#!/bin/bash
+
+#
+# Expects test-sender and test-receiver are in your path.
+# These tools are available in the tests subdir of the build directory
+# of the qpid-dispatch git repo.
+
+function usage {
+    echo "Usage: $0 [-a <router-address:port>] [-t <target-address>]"
+    exit 1
+}
+
+ROUTER="127.0.0.1:5672"
+TARGET="test-address"
+
+
+while getopts ":a:t:" opt; do
+    case $opt in
+        a) ROUTER=$OPTARG ;;
+        t) TARGET=$OPTARG ;;
+        *) usage ;;
+    esac
+done
+
+set -x
+
+function spawn_sender {
+    test-sender -a $ROUTER -t $TARGET $@ &
+    WAIT_PIDS+="$! "
+}
+
+function spawn_receiver {
+    test-receiver -a $ROUTER -s $TARGET $@ &
+    WAIT_PIDS+="$! "
+}
+
+
+
+# these receive forever, guarantee $TARGET has subscribers
+WAIT_PIDS=
+spawn_receiver -c 0 -w 1
+spawn_receiver -c 0 -w 1
+
+while true; do
+    WAIT_PIDS=
+    spawn_receiver -c 1 -w 1
+    spawn_receiver -c 1 -w 1
+    spawn_receiver -c 1 -E -w 1
+    spawn_receiver -c 1 -w 1
+    spawn_receiver -c 1 -w 1
+    spawn_receiver -c 1 -w 1
+    spawn_receiver -c 1 -E -w 1
+    spawn_receiver -c 1 -w 1
+    spawn_receiver -c 1 -w 1
+    spawn_receiver -c 1 -w 1
+    spawn_receiver -c 1 -w 1
+    spawn_receiver -c 1 -w 1
+    spawn_receiver -c 1 -E -w 1
+    spawn_receiver -c 1 -w 1
+    spawn_receiver -c 1 -w 1
+    spawn_receiver -c 1 -w 1
+    spawn_receiver -c 1 -E -w 1
+    spawn_receiver -c 1 -w 1
+    spawn_receiver -c 1 -w 1
+    spawn_receiver -c 10 -w 10
+    spawn_receiver -c 10 -w 10
+
+    WAIT_PIDS=
+    spawn_sender -c 10 -sl
+    spawn_sender -c 10
+    spawn_sender -c 10 -sm
+    spawn_sender -c 10
+    spawn_sender -c 10 -sl
+    spawn_sender -c 10
+    spawn_sender -c 10
+    spawn_sender -c 1 -E
+    spawn_sender -c 10
+    spawn_sender -c 1 -E
+    spawn_sender -c 10
+    spawn_sender -c 10
+    spawn_sender -c 10
+    spawn_sender -c 10 -sm
+    spawn_sender -c 10
+    spawn_sender -c 10
+    spawn_sender -c 1 -sx
+    spawn_sender -c 10
+    spawn_sender -c 1 -E -sx
+    spawn_sender -c 10
+    spawn_sender -c 1 -E
+    spawn_sender -c 10
+
+    echo "WAIT_PIDS=[$WAIT_PIDS]"
+    wait $WAIT_PIDS
+done
+

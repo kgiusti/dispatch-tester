@@ -1,0 +1,19 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-perf
+spec:
+  selector:
+    matchLabels:
+      application: nginx-perf
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        application: nginx-perf
+    spec:
+      containers:
+        - image: localhost/nginx-perf
+          name: nginx-perf
+          imagePullPolicy: IfNotPresent
