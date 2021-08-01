@@ -16,8 +16,9 @@ https://activemq.apache.org/components/artemis/download/
 
 $ set-up.sh -p <proton tag> -d <dispatch-tag> $artemis-tarfile
 
-The routers can be accessed via 127.0.0.1:8888 and 127.0.0.1:9999 and
-the broker can be accessed via 127.0.0.1:7777.
+The routers can be accessed via 127.0.0.1:8888 and 127.0.0.1:9999.
+
+The broker can be accessed via 127.0.0.1:7777.
 
 The test is run by executing the test.sh script once set-up.sh
 completes.  This script runs 1000 cycles of bursty traffic.
