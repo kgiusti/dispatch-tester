@@ -23,6 +23,7 @@
  */
 
 
+#include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -43,9 +44,6 @@
 #include "proton/handlers.h"
 
 
-#define MAX_SIZE 1
-char in_buffer[MAX_SIZE];
-
 bool stop = false;
 
 uint64_t start_ts;  // start timestamp
@@ -55,7 +53,9 @@ int  credit_window = 1000;
 char *source_address = "test-throughput";  // name of the source node to receive from
 char *host_address = "127.0.0.1:5672";
 char *container_name = "ThroughputReceiver";
+bool server_mode = false;
 
+pn_acceptor_t *acceptor;
 pn_connection_t *pn_conn;
 pn_session_t *pn_ssn;
 pn_link_t *pn_link;
@@ -108,18 +108,54 @@ static void delete_handler(pn_handler_t *handler)
 }
 
 
-/* Process each event posted by the reactor.
- */
-static void event_handler(pn_handler_t *handler,
-                          pn_event_t *event,
-                          pn_event_type_t type)
+// process PN_DELIVERY event
+//
+static void handle_delivery(pn_delivery_t *dlv)
 {
+    if (limit && count == limit) return;
+
+    if (pn_delivery_readable(dlv) && !pn_delivery_partial(dlv)) {
+        // A full message has arrived
+        if (!start_ts) start_ts = now_usec();
+        count += 1;
+
+        pn_delivery_update(dlv, PN_ACCEPTED);
+        pn_delivery_settle(dlv);  // dlv is now freed
+
+        if (limit && count == limit) {
+            stop = true;
+            if (!stop_ts) stop_ts = now_usec();
+            pn_reactor_wakeup(reactor);
+        } else if (pn_link_credit(pn_link) <= credit_window/2) {
+            // Grant enough credit to bring it up to CAPACITY:
+            int grant = credit_window - pn_link_credit(pn_link);
+            if (limit && (limit - count) < grant) {
+                // don't grant more than we want to receive
+                grant = limit - count;
+            }
+            if (grant) {
+                //fprintf(stdout, "Granting credit %d\n", grant);
+                pn_link_flow(pn_link, credit_window - pn_link_credit(pn_link));
+            }
+        }
+    }
+}
+
+
+/* Handle connection events for connections initiated by
+ * this container
+ */
+static void outgoing_conn_event_handler(pn_handler_t *handler,
+                                        pn_event_t *event,
+                                        pn_event_type_t type)
+{
+    //fprintf(stdout, "OUT_CONN_EVENT_HANDLER: %s\n", pn_event_type_name(type));
     switch (type) {
 
     case PN_CONNECTION_INIT: {
-        // Create and open all the endpoints needed to send a message
-        //
         pn_connection_open(pn_conn);
+
+        // initiate endpoint setup
         pn_ssn = pn_session(pn_conn);
         pn_session_open(pn_ssn);
         pn_link = pn_receiver(pn_ssn, "MyReceiver");
@@ -127,45 +163,115 @@ static void event_handler(pn_handler_t *handler,
         pn_link_open(pn_link);
         // cannot receive without granting credit:
         pn_link_flow(pn_link, credit_window);
+
     } break;
 
     case PN_DELIVERY: {
         // A message has been received
         //
-        if (limit && count == limit) break;
-
-        pn_delivery_t *dlv = pn_event_delivery(event);
-        if (pn_delivery_readable(dlv) && !pn_delivery_partial(dlv)) {
-            // A full message has arrived
-            if (!start_ts) start_ts = now_usec();
-            count += 1;
-
-            pn_delivery_update(dlv, PN_ACCEPTED);
-            pn_delivery_settle(dlv);  // dlv is now freed
-
-            if (limit && count == limit) {
-                stop = true;
-                if (!stop_ts) stop_ts = now_usec();
-                pn_reactor_wakeup(reactor);
-            } else if (pn_link_credit(pn_link) <= credit_window/2) {
-                // Grant enough credit to bring it up to CAPACITY:
-                int grant = credit_window - pn_link_credit(pn_link);
-                if (limit && (limit - count) < grant) {
-                    // don't grant more than we want to receive
-                    grant = limit - count;
-                }
-                if (grant) {
-                    //fprintf(stdout, "Granting credit %d\n", grant);
-                    pn_link_flow(pn_link, credit_window - pn_link_credit(pn_link));
-                }
-            }
-        }
+        handle_delivery(pn_event_delivery(event));
     } break;
 
     default:
         break;
     }
 }
+
+
+/* Handle connection events for connections initiated by
+ * a remote endpoint
+ */
+static void incoming_conn_event_handler(pn_handler_t *handler,
+                                        pn_event_t *event,
+                                        pn_event_type_t type)
+{
+    //fprintf(stdout, "IN_CONN_EVENT_HANDLER: %s\n", pn_event_type_name(type));
+    switch (type) {
+
+    case PN_SESSION_REMOTE_OPEN:
+    {
+        assert(!pn_ssn);
+        pn_ssn = pn_event_session(event);
+        pn_session_open(pn_ssn);
+    }
+    break;
+
+    case PN_LINK_REMOTE_OPEN:
+    {
+        assert(!pn_link);
+        pn_link = pn_event_link(event);
+        pn_terminus_set_address(pn_link_source(pn_link), source_address);
+        pn_link_open(pn_link);
+        pn_link_flow(pn_link, credit_window);
+    }
+    break;
+
+    case PN_DELIVERY: {
+        // A message has been received
+        //
+        handle_delivery(pn_event_delivery(event));
+    } break;
+
+    case PN_CONNECTION_REMOTE_CLOSE: {
+        pn_ssn = 0;
+        pn_link = 0;
+        pn_conn = 0;
+    } break;
+
+    default:
+        break;
+    }
+}
+
+
+/* Process listener (server socket) events
+ */
+static void acceptor_event_handler(pn_handler_t *handler,
+                                   pn_event_t *event,
+                                   pn_event_type_t type)
+{
+    assert(server_mode);
+    //fprintf(stdout, "ACCEPTOR_EVENT_HANDLER: %s\n", pn_event_type_name(type));
+
+    switch (type) {
+    case PN_CONNECTION_INIT:
+    {
+        // New incoming connection on listener socket.
+        // There can be only one.
+        if (pn_conn) {
+            fprintf(stderr, "Rejecting additional connection attempts\n");
+            pn_connection_close(pn_event_connection(event));
+        } else {
+            pn_conn = pn_event_connection(event);
+            pn_handler_t *handler = pn_handler_new(incoming_conn_event_handler, 0, delete_handler);
+            pn_handler_add(handler, pn_handshaker());
+            pn_record_t *record = pn_connection_attachments(pn_conn);
+            pn_record_set_handler(record, handler);
+
+            pn_connection_set_container(pn_conn, container_name);
+            pn_connection_set_hostname(pn_conn, host_address);
+
+            //endpoints_setup(pn_conn);
+        }
+    }
+    break;
+    case PN_REACTOR_QUIESCED:
+    {
+    }
+    break;
+    case PN_REACTOR_INIT:
+    {
+    }
+    break;
+    case PN_REACTOR_FINAL:
+    {
+    }
+    break;
+    default:
+        break;
+    }
+}
+
 
 static void usage(void)
 {
@@ -175,21 +281,17 @@ static void usage(void)
   printf("-i      \tContainer name [%s]\n", container_name);
   printf("-s      \tSource address [%s]\n", source_address);
   printf("-w      \tCredit window [%d]\n", credit_window);
+  printf("-S      \tServer mode (accept connection requests)\n");
   exit(1);
 }
 
 
 int main(int argc, char** argv)
 {
-    /* create a handler for the connection's events.
-     */
-    pn_handler_t *handler = pn_handler_new(event_handler, 0, delete_handler);
-    pn_handler_add(handler, pn_handshaker());
-
     /* command line options */
     opterr = 0;
     int c;
-    while((c = getopt(argc, argv, "i:a:s:hw:c:")) != -1) {
+    while((c = getopt(argc, argv, "i:a:s:hw:c:S")) != -1) {
         switch(c) {
         case 'h': usage(); break;
         case 'a': host_address = optarg; break;
@@ -199,6 +301,7 @@ int main(int argc, char** argv)
             break;
         case 'i': container_name = optarg; break;
         case 's': source_address = optarg; break;
+        case 'S': server_mode = true; break;
         case 'w':
             if (sscanf(optarg, "%d", &credit_window) != 1 || credit_window <= 0)
                 usage();
@@ -214,11 +317,42 @@ int main(int argc, char** argv)
     signal(SIGINT,  signal_handler);
 
     reactor = pn_reactor();
-    pn_conn = pn_reactor_connection(reactor, handler);
 
-    // the container name should be unique for each client
-    pn_connection_set_container(pn_conn, container_name);
-    pn_connection_set_hostname(pn_conn, host_address);
+    if (server_mode) {
+        char *host = 0;
+        char *port = 0;
+        const char *foo = strrchr(host_address, ':');
+        if (foo) {
+            const size_t hlen = foo - host_address;
+            if (hlen) {
+                host = malloc(hlen + 1);
+                memcpy(host, host_address, hlen);
+                host[hlen] = 0;
+            }
+            const size_t plen = strlen(foo + 1);
+            if (plen) {
+                port = malloc(plen + 1);
+                memcpy(port, (foo + 1), plen);
+                port[plen] = 0;
+            }
+        }
+        if (!host) host = strdup(host_address);
+        if (!port) port = strdup("5672");
+
+        //fprintf(stdout, "HOST='%s' PORT='%s'\n", host, port);
+        pn_handler_t *handler = pn_handler_new(acceptor_event_handler, 0, delete_handler);
+        acceptor = pn_reactor_acceptor(reactor, host, port, handler);
+        free(host);
+        free(port);
+    } else {
+        pn_handler_t *handler = pn_handler_new(outgoing_conn_event_handler, 0, delete_handler);
+        pn_handler_add(handler, pn_handshaker());
+        pn_conn = pn_reactor_connection(reactor, handler);
+
+        // the container name should be unique for each client
+        pn_connection_set_container(pn_conn, container_name);
+        pn_connection_set_hostname(pn_conn, host_address);
+    }
 
     // periodic wakeup to print current stats
     pn_reactor_set_timeout(reactor, 10000);
@@ -230,7 +364,8 @@ int main(int argc, char** argv)
             // eventually break the loop
             if (pn_link) pn_link_close(pn_link);
             if (pn_ssn) pn_session_close(pn_ssn);
-            pn_connection_close(pn_conn);
+            if (pn_conn) pn_connection_close(pn_conn);
+            if (acceptor) pn_acceptor_close(acceptor);
         }
     }
 
