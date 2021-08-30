@@ -213,9 +213,9 @@ static void incoming_conn_event_handler(pn_handler_t *handler,
     } break;
 
     case PN_CONNECTION_REMOTE_CLOSE: {
-        pn_ssn = 0;
-        pn_link = 0;
-        pn_conn = 0;
+        if (!stop_ts) stop_ts = now_usec();
+        assert(acceptor);
+        pn_acceptor_close(acceptor);  // this will exit the test
     } break;
 
     default:
