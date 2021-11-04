@@ -54,6 +54,7 @@ char *source_address = "test-throughput";  // name of the source node to receive
 char *host_address = "127.0.0.1:5672";
 char *container_name = "ThroughputReceiver";
 bool server_mode = false;
+bool bytes_throughput = false;  // compute byte throughput
 
 pn_acceptor_t *acceptor;
 pn_connection_t *pn_conn;
@@ -63,7 +64,9 @@ pn_reactor_t *reactor;
 
 uint64_t count = 0;
 uint64_t limit = 0;   // if > 0 stop after limit messages arrive
+size_t total_bytes = 0;
 
+char scratch[2097152];
 
 // microseconds per second
 #define USECS_PER_SECOND 1000000
@@ -120,6 +123,14 @@ static void handle_delivery(pn_delivery_t *dlv)
         count += 1;
 
         pn_delivery_update(dlv, PN_ACCEPTED);
+
+        if (bytes_throughput) {
+            ssize_t rc = 0;
+            while ((rc = pn_link_recv(pn_delivery_link(dlv), &scratch[0], sizeof(scratch))) != PN_EOS) {
+                total_bytes += rc;
+            }
+        }
+
         pn_delivery_settle(dlv);  // dlv is now freed
 
         if (limit && count == limit) {
@@ -282,6 +293,7 @@ static void usage(void)
   printf("-s      \tSource address [%s]\n", source_address);
   printf("-w      \tCredit window [%d]\n", credit_window);
   printf("-S      \tServer mode (accept connection requests)\n");
+  printf("-B      \tReport byte throughput\n");
   exit(1);
 }
 
@@ -291,7 +303,7 @@ int main(int argc, char** argv)
     /* command line options */
     opterr = 0;
     int c;
-    while((c = getopt(argc, argv, "i:a:s:hw:c:S")) != -1) {
+    while((c = getopt(argc, argv, "i:a:s:hw:c:BS")) != -1) {
         switch(c) {
         case 'h': usage(); break;
         case 'a': host_address = optarg; break;
@@ -301,6 +313,7 @@ int main(int argc, char** argv)
             break;
         case 'i': container_name = optarg; break;
         case 's': source_address = optarg; break;
+        case 'B': bytes_throughput = true; break;
         case 'S': server_mode = true; break;
         case 'w':
             if (sscanf(optarg, "%d", &credit_window) != 1 || credit_window <= 0)
@@ -342,6 +355,7 @@ int main(int argc, char** argv)
         //fprintf(stdout, "HOST='%s' PORT='%s'\n", host, port);
         pn_handler_t *handler = pn_handler_new(acceptor_event_handler, 0, delete_handler);
         acceptor = pn_reactor_acceptor(reactor, host, port, handler);
+        if (!acceptor) abort();
         free(host);
         free(port);
     } else {
@@ -371,8 +385,14 @@ int main(int argc, char** argv)
 
     if (count) {
         double duration_sec = (double)(stop_ts - start_ts) / (double)USECS_PER_SECOND;
-        printf("RX:  Throughput:  count: %"PRIu64" rate: %.3f msgs/sec\n",
-               count, (duration_sec > 0.0) ? count / duration_sec : 0.0);
+        printf("%s:  Throughput:  count: %"PRIu64" rate: %.3f msgs/sec",
+               container_name,
+               count, (duration_sec > 1.0) ? count / duration_sec : count * 1.0);
+        if (total_bytes) {
+            printf(" rate: %.3f bytes/sec",
+                   (duration_sec > 1.0) ? total_bytes / duration_sec : total_bytes * 1.0);
+        }
+        printf("\n");
     }
 
     return 0;

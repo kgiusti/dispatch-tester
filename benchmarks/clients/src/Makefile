@@ -2,7 +2,7 @@ C_FLAGS = -O2 -g -Wall -I. -lqpid-proton -lm
 
 BUILD_OPTS = -I/opt/kgiusti/include -L/opt/kgiusti/lib64
 
-all: sender receiver server blocking-sender latency-sender latency-receiver throughput-sender throughput-receiver
+all: sender receiver server blocking-sender latency-sender latency-receiver throughput-sender throughput-receiver chunked-sender
 
 clean:
 	rm -f sender receiver server blocking-sender latency-sender latency-receiver throughput-sender throughput-receiver
@@ -30,4 +30,7 @@ throughput-sender: throughput-sender.c
 
 throughput-receiver: throughput-receiver.c
 	gcc $(BUILD_OPTS) $(C_FLAGS) -o throughput-receiver throughput-receiver.c
+
+chunked-sender: chunked-sender.c
+	gcc $(BUILD_OPTS) $(C_FLAGS) -o chunked-sender chunked-sender.c
 

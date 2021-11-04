@@ -51,6 +51,8 @@
 #define BODY_SIZE_LARGE  60000
 #define BODY_SIZE_WUMBO  1048576 // keep in sync w/throughput-receiver.c
 
+#define DEFAULT_PRIORITY 4
+
 char _payload[BODY_SIZE_WUMBO] = {0};
 pn_bytes_t body_data = {
     .size  = 0,
@@ -59,6 +61,7 @@ pn_bytes_t body_data = {
 
 bool stop = false;
 
+uint8_t  priority = DEFAULT_PRIORITY;
 uint64_t limit = 1;               // # messages to send
 uint64_t count = 0;               // # sent
 uint64_t acked = 0;               // # of received acks
@@ -111,6 +114,10 @@ void generate_message()
         out_message = pn_message();
     }
     pn_message_set_address(out_message, target_address);
+
+    if (priority != DEFAULT_PRIORITY) {
+        pn_message_set_priority(out_message, priority);
+    }
 
     pn_data_t *body = pn_message_body(out_message);
     pn_data_clear(body);
@@ -269,13 +276,14 @@ static void event_handler(pn_handler_t *handler,
 static void usage(void)
 {
   printf("Usage: sender <options>\n");
-  printf("-a      \tThe host address [%s]\n", host_address);
-  printf("-c      \t# of messages to send, 0 == nonstop [%"PRIu64"]\n", limit);
-  printf("-i      \tContainer name [%s]\n", container_name);
-  printf("-n      \tUse an anonymous link [%s]\n", BOOL2STR(use_anonymous));
-  printf("-s      \tBody size in bytes ('s'=%d 'm'=%d 'l'=%d 'x'=%d) [%d]\n",
+  printf("-a \tThe host address [%s]\n", host_address);
+  printf("-c \t# of messages to send, 0 == nonstop [%"PRIu64"]\n", limit);
+  printf("-i \tContainer name [%s]\n", container_name);
+  printf("-n \tUse an anonymous link [%s]\n", BOOL2STR(use_anonymous));
+  printf("-p \tMessage priority [%"PRIu8"]\n", priority);
+  printf("-s \tBody size in bytes ('s'=%d 'm'=%d 'l'=%d 'x'=%d) [%d]\n",
          BODY_SIZE_SMALL, BODY_SIZE_MEDIUM, BODY_SIZE_LARGE, BODY_SIZE_WUMBO, body_size);
-  printf("-t      \tTarget address [%s]\n", target_address);
+  printf("-t \tTarget address [%s]\n", target_address);
   exit(1);
 }
 
@@ -285,7 +293,7 @@ int main(int argc, char** argv)
     /* command line options */
     opterr = 0;
     int c;
-    while ((c = getopt(argc, argv, "ha:c:i:ns:t:")) != -1) {
+    while ((c = getopt(argc, argv, "ha:c:i:np:s:t:")) != -1) {
         switch(c) {
         case 'h': usage(); break;
         case 'a': host_address = optarg; break;
@@ -295,6 +303,10 @@ int main(int argc, char** argv)
             break;
         case 'i': container_name = optarg; break;
         case 'n': use_anonymous = true; break;
+        case 'p':
+            if (sscanf(optarg, "%"SCNu8, &priority) != 1)
+                usage();
+            break;
         case 's':
             switch (optarg[0]) {
             case 's': body_size = BODY_SIZE_SMALL; break;
@@ -343,13 +355,14 @@ int main(int argc, char** argv)
     }
 
     fprintf(stdout,
-            "TX: Sent: %"PRIu64" Accepted: %"PRIu64" Not Accepted: %"PRIu64" Body Size: %d bytes\n",
+            "%s: Sent: %"PRIu64" Accepted: %"PRIu64" Not Accepted: %"PRIu64" Body Size: %d bytes\n",
+            container_name,
             count, acked, not_accepted, body_size);
     {
         double duration_sec = (stop_ts - start_ts) / (double)USECS_PER_SECOND;
         fprintf(stdout,
-                "TX:  Throughput:  %"PRIu64" msgs sent over %.3f seconds. Rate: %.3f msgs/sec\n",
-                count, duration_sec,
+                "%s:  Throughput:  %"PRIu64" msgs sent over %.3f seconds. Rate: %.3f msgs/sec\n",
+                container_name, count, duration_sec,
                 (duration_sec > 0.0) ? (double)count / duration_sec : 0.0);
     }
     return 0;

@@ -1,5 +1,5 @@
 A set of tools and configurations for benchmarking qdrouterd
-performance.
+performance.  (see setup.sh)
 
 Notes:
   * The dispatch build environment enables malloc() debugging by
@@ -18,6 +18,10 @@ Notes:
     threads to share the same physical CPU core.  It is also
     recommended to isolate the benchmark clients on their own CPU to
     minimize their affect on the qdrouterd process(es).
+
+  * (cpu-id, core-id)
+    (0, 0), (1, 1), (2, 2), (3, 3)
+    (4, 0), (5, 1)  (6, 2), (7, 3)
 
   * Set all cpu's governor to 'performance':
     $ sudo cpupower -c all frequency-set -g performance

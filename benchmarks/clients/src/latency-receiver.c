@@ -311,7 +311,7 @@ int main(int argc, char** argv)
         isos = isos - (lmean * lmean);
         double std_dev = sqrt((double)isos);
         fprintf(stdout,
-                "RX:  Latency:  Avg %.3f msec Max %.3f msec Min %.3f msec (std dev %.3f msec)\n",
+                "RX:  Latency:  Avg: %.3f msec Max: %.3f msec Min: %.3f, Std deviation: %.3f msec\n",
                (double)lmean / 1000.0,
                (double)max_latency / 1000.0,
                (double)min_latency / 1000.0,
