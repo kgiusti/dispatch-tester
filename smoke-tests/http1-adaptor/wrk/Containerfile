@@ -1,0 +1,9 @@
+FROM fedora:latest
+
+WORKDIR /main
+RUN dnf install -y gcc git make unzip perl \
+    && dnf clean all -y \
+    && git clone --branch master --single-branch --depth 1 https://github.com/wg/wrk \
+    && make -C wrk
+
+ENTRYPOINT ["wrk/wrk"]

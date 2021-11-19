@@ -1,0 +1,2 @@
+FROM docker.io/library/nginx:latest
+COPY data /usr/share/nginx/html/

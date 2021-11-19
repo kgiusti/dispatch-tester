@@ -22,12 +22,12 @@ oslo.messaging, and ombt packages.  Example:
 
 $ virtualenv venv
 $ source ./venv/bin/activate
-$ pip install pyngus oslo.messaging ombt
+$ pip install --no-cache-dir pyngus oslo.messaging ombt
 
 2) run the smoke test script found in the tests directory (from within
 the python virtual environment of course).  Example:
 
-(venv) $ source ./tests/test_smoke_01.sh
+(venv) $ nice ./tests/test_smoke_01.sh
 
 You can run qdstat commands against the routers by specifying the '-b'
 option with the proper port number (see the router*-qdrouterd.conf
