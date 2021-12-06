@@ -1,18 +1,27 @@
 2 router - 1 broker smoke test
+==============================
 
 This test create containers for two routers each connected to a broker
 (artemis) running in its own container.  The router configurations
-define link routes and auto links that terminate on the broker.
+define link routes and auto links that terminate on the broker.  The
+test runs a number of clients designed to generate bursts of mixed
+traffic with the goal of stressing the dispatch network.
+
+Prerequistes:
 
 The test creates message traffic using test-sender and test-receiver
 from the qpid-dispatch project.  The test script assumes both these
 executables are found in the current path, as well as the qdstat
-router tool.
+router tool. The path can be set up properly by simply sourcing the
+config.sh file that is built as part of the qpid-dispatch build
+process.
 
-You must download the Artemis broker tarfile and provide it to the set-up.sh script.
-The broker tarfile can be downloaded from
+You must download the Artemis broker tarfile and provide it to the
+set-up.sh script. The broker tarfile can be downloaded from
 
 https://activemq.apache.org/components/artemis/download/
+
+Running the test:
 
 $ set-up.sh -p <proton tag> -d <dispatch-tag> $artemis-tarfile
 
