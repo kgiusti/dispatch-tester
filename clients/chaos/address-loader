@@ -59,7 +59,9 @@ class UnicastGenerator(object):
 
         # put the unique stuff (uuid + counter) at end to make address
         # comparision a bit more computationally demanding
-        return self._prefix + filler + self._unique + num
+        addr = self._prefix + filler + self._unique + num
+        print("LEN=%d" % len(addr))
+        return addr
 
 
 class AddressLoader(MessagingHandler):
