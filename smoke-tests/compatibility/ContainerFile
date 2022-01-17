@@ -1,0 +1,105 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# Downloads and installs apache proton and qpid dispatch on the latest
+# version of Fedora and starts the dispatch router.
+# Example:
+#   sudo docker build -t <username>/dispatch .
+#   sudo docker run -i -t <username>/dispatch
+
+# Gets the latest Fedora from dockerhub
+FROM fedora:latest
+
+LABEL maintainer=kgiusti@gmail.com
+
+# Install all the required packages. Some in this list were picked off
+#  from proton's INSTALL.md
+#  (https://github.com/apache/qpid-proton/blob/main/INSTALL.md) and
+#  the rest are from dispatch
+#  (https://github.com/apache/qpid-dispatch/blob/main/README)
+
+RUN dnf -y install \
+    gcc \
+    gcc-c++ \
+    cmake \
+    openssl-devel \
+    cyrus-sasl-devel \
+    cyrus-sasl-plain \
+    cyrus-sasl-gssapi \
+    cyrus-sasl-md5 \
+    swig \
+    python-devel \
+    make \
+    libuv \
+    libuv-devel \
+    libwebsockets-devel \
+    wget \
+    procps-ng \
+    && dnf clean all -y
+
+ARG config_file
+ARG proton_branch
+ARG proton_url
+ARG dispatch_branch
+ARG dispatch_url
+
+ENV config_file ${config_file:-qdrouterd.conf}
+ENV proton_branch ${proton_branch:-main}
+ENV proton_url ${proton_url:-https://github.com/apache/qpid-proton/archive}
+ENV dispatch_branch ${dispatch_branch:-main}
+ENV dispatch_url ${dispatch_url:-https://github.com/apache/qpid-dispatch/archive}
+
+# Create a main directory for building proton and dispatch router
+#
+WORKDIR /main
+
+# build and install proton from ${proton_branch} on ${proton_url}
+#
+RUN echo "Building proton ${proton_url}/${proton_branch}.tar.gz" \
+    && wget --quiet ${proton_url}/${proton_branch}.tar.gz \
+    && mkdir proton-build \
+    && tar -xz --strip-components=1 -C proton-build -f ${proton_branch}.tar.gz \
+    && mkdir -p proton-build/BUILD \
+    && cd proton-build/BUILD \
+    && cmake .. -DSYSINSTALL_BINDINGS=ON -DCMAKE_INSTALL_PREFIX=/usr -DSYSINSTALL_PYTHON=ON \
+                -DBUILD_BINDINGS=python \
+    && make -j8 install \
+    && cd /main \
+    && rm -rf ${proton_branch}.tar.gz proton-build
+
+# build and install dispatch from ${dispatch_branch} on ${dispatch_url}
+#
+RUN echo "Building dispatch ${dispatch_url}/${dispatch_branch}.tar.gz" \
+    && wget --quiet ${dispatch_url}/${dispatch_branch}.tar.gz \
+    && mkdir dispatch-build \
+    && tar -xz --strip-components=1 -C dispatch-build -f ${dispatch_branch}.tar.gz \
+    && mkdir -p dispatch-build/BUILD \
+    && cd dispatch-build/BUILD \
+    && cmake .. -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Debug \
+    && make -j8 install \
+    && cd /main \
+    && rm -rf ${dispatch_branch}.tar.gz dispatch-build
+
+# move the configuration file in place
+#
+COPY ${config_file} /etc/qpid-dispatch/qdrouterd.conf
+
+# Start the dispatch router
+#
+CMD ["qdrouterd"]
