@@ -17,14 +17,17 @@
 # under the License.
 #
 
-# Builds and runs qpid-dispatch-router in a container.
+# Full native build of qpid-dispatch-router.
 #
-# This build script assumes that the router config file is present at
-# the top level of the build context.  This can be overridden using
-# the config_path build argument.
+# Parameterized to allow selection of git repos and branches used for
+# fetching sources and configuration customization.  This build script
+# assumes that the router config file is present at the top level of
+# the build context.  This can be overridden using the config_path
+# build argument.
 
-FROM fedora:latest
-LABEL maintainer=kgiusti@gmail.com
+FROM registry.fedoraproject.org/fedora-minimal
+MAINTAINER Ken Giusti <kgiusti@gmail.com>
+LABEL description="Full build of qpid-dispatch-router"
 
 #
 # Build arguments:
@@ -33,6 +36,11 @@ LABEL maintainer=kgiusti@gmail.com
 #   dispatch_branch - git branch/tag name of qdrouterd source
 #   dispatch_url - git url to qdrouterd repo
 #   config_file - qdrouterd config file to use
+# Example:
+# podman build --tag testrouter:1 --file Container-scratch \
+#       --build-arg dispatch_branch=DISPATCH-1487 \
+#       --build-arg dispatch_url=https://github.com/kgiusti/dispatch.git \
+#       --build-arg config_file=test-config.conf .
 
 ARG proton_branch
 ARG proton_url
@@ -40,20 +48,19 @@ ARG dispatch_branch
 ARG dispatch_url
 ARG config_file
 
-ENV proton_branch ${proton_branch:-master}
+ENV proton_branch ${proton_branch:-main}
 ENV proton_url ${proton_url:-https://gitbox.apache.org/repos/asf/qpid-proton.git}
-ENV dispatch_branch ${dispatch_branch:-master}
+ENV dispatch_branch ${dispatch_branch:-main}
 ENV dispatch_url ${dispatch_url:-https://gitbox.apache.org/repos/asf/qpid-dispatch.git}
 ENV config_file ${config_file:-qdrouterd.conf}
 
-
 # Install all the required packages. Some in this list were picked off
 #  from proton's INSTALL.md
-#  (https://github.com/apache/qpid-proton/blob/master/INSTALL.md) and
+#  (https://github.com/apache/qpid-proton/blob/main/INSTALL.md) and
 #  the rest are from dispatch
-#  (https://github.com/apache/qpid-dispatch/blob/master/README)
+#  (https://github.com/apache/qpid-dispatch/blob/main/README)
 
-RUN dnf -y install \
+RUN microdnf -y install \
     gcc \
     gcc-c++ \
     cmake \
@@ -63,13 +70,13 @@ RUN dnf -y install \
     cyrus-sasl-gssapi \
     cyrus-sasl-md5 \
     swig \
-    python-devel \
+    python3-devel \
     make \
     libuv \
     libuv-devel \
     libwebsockets-devel \
     git \
-    && dnf clean all -y
+    && microdnf clean all -y
 
 # Create a main directory for building proton and dispatch router
 #
@@ -93,7 +100,7 @@ RUN git clone --branch ${dispatch_branch} --single-branch --depth 1 ${dispatch_u
     && cd qpid-dispatch \
     && mkdir BUILD \
     && cd BUILD \
-    && cmake .. -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Debug \
+    && cmake .. -DCMAKE_INSTALL_PREFIX=/usr -DCONSOLE_INSTALL=OFF  \
     && make install \
     && cd /main \
     && rm -rf qpid-dispatch
@@ -104,4 +111,4 @@ COPY ${config_file} /etc/qpid-dispatch/qdrouterd.conf
 
 # Start the dispatch router
 #
-CMD ["qdrouterd"]
+ENTRYPOINT ["qdrouterd"]
