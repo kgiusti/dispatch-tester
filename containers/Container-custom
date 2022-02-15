@@ -35,24 +35,15 @@ LABEL description="Full build of qpid-dispatch-router"
 #   proton_url - git url to proton repo
 #   dispatch_branch - git branch/tag name of qdrouterd source
 #   dispatch_url - git url to qdrouterd repo
-#   config_file - qdrouterd config file to use
 # Example:
 # podman build --tag testrouter:1 --file Container-scratch \
 #       --build-arg dispatch_branch=DISPATCH-1487 \
-#       --build-arg dispatch_url=https://github.com/kgiusti/dispatch.git \
-#       --build-arg config_file=test-config.conf .
+#       --build-arg dispatch_url=https://github.com/kgiusti/dispatch.git .
 
-ARG proton_branch
-ARG proton_url
-ARG dispatch_branch
-ARG dispatch_url
-ARG config_file
-
-ENV proton_branch ${proton_branch:-main}
-ENV proton_url ${proton_url:-https://gitbox.apache.org/repos/asf/qpid-proton.git}
-ENV dispatch_branch ${dispatch_branch:-main}
-ENV dispatch_url ${dispatch_url:-https://gitbox.apache.org/repos/asf/qpid-dispatch.git}
-ENV config_file ${config_file:-qdrouterd.conf}
+ARG proton_branch=main
+ARG proton_url=https://gitbox.apache.org/repos/asf/qpid-proton.git
+ARG dispatch_branch=main
+ARG dispatch_url=https://gitbox.apache.org/repos/asf/qpid-dispatch.git
 
 # Install all the required packages. Some in this list were picked off
 #  from proton's INSTALL.md
@@ -84,7 +75,8 @@ WORKDIR /main
 
 # build and install proton from ${proton_branch} on ${proton_url}
 #
-RUN git clone --branch ${proton_branch} --single-branch --depth 1 ${proton_url} qpid-proton \
+RUN echo "GIT CLONING: proton version ${proton_branch}" \
+    && git clone --branch ${proton_branch} --single-branch --depth 1 ${proton_url} qpid-proton \
     && cd qpid-proton \
     && mkdir BUILD \
     && cd BUILD \
@@ -96,7 +88,8 @@ RUN git clone --branch ${proton_branch} --single-branch --depth 1 ${proton_url} 
 
 # build and install dispatch from ${dispatch_branch} on ${dispatch_url}
 #
-RUN git clone --branch ${dispatch_branch} --single-branch --depth 1 ${dispatch_url} qpid-dispatch \
+RUN echo "GIT CLONING: dispatch version ${dispatch_branch} @ ${dispatch_url}" \
+    && git clone --branch ${dispatch_branch} --single-branch --depth 1 ${dispatch_url} qpid-dispatch \
     && cd qpid-dispatch \
     && mkdir BUILD \
     && cd BUILD \
@@ -104,10 +97,6 @@ RUN git clone --branch ${dispatch_branch} --single-branch --depth 1 ${dispatch_u
     && make install \
     && cd /main \
     && rm -rf qpid-dispatch
-
-# move the configuration file in place
-#
-COPY ${config_file} /etc/qpid-dispatch/qdrouterd.conf
 
 # Start the dispatch router
 #

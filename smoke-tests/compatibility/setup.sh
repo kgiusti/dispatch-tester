@@ -2,10 +2,8 @@
 #
 set -e
 usage="Usage: $0 [-p <proton-branch>] [-d <dispatch-branch>] [-u <git-url>]"
-usage+=" Use -P <proton-branch> -D <dispatch-branch> or"
-usage+=" -U <git-url> for cross version testing"
 usage+=" Example url for branches:"
-usage+=" -d DISPATCH-2305 -u https://github.com/kgiusti/dispatch/archive/refs/heads"
+usage+=" -d DISPATCH-2305 -u https://github.com/kgiusti/dispatch.git"
 
 while getopts "p:d:P:D:u:U:c:" opt; do
     case $opt in
@@ -15,17 +13,8 @@ while getopts "p:d:P:D:u:U:c:" opt; do
         d)
             dispatch_branch=$OPTARG
             ;;
-        P)
-            old_proton_branch=$OPTARG
-            ;;
-        D)
-            old_dispatch_branch=$OPTARG
-            ;;
         u)
             dispatch_url=$OPTARG
-            ;;
-        U)
-            old_dispatch_url=$OPTARG
             ;;
         ?)
             echo $usage
@@ -35,43 +24,62 @@ while getopts "p:d:P:D:u:U:c:" opt; do
 done
 
 proton_branch=${proton_branch:-"main"}
-old_proton_branch=${old_proton_branch:-$proton_branch}
-
 dispatch_branch=${dispatch_branch:-"main"}
-old_dispatch_branch=${old_dispatch_branch:-$dispatch_branch}
-
-old_dispatch_url=${old_dispatch_url:-"https://github.com/apache/qpid-dispatch/archive"}
-dispatch_url=${dispatch_url:-$old_dispatch_url}
+dispatch_url=${dispatch_url:-"https://gitbox.apache.org/repos/asf/qpid-dispatch.git"}
 
 set -x
 
-podman build --tag dispatch-tester/edge1:1 --file ContainerFile \
-       --build-arg config_file=Edge1.conf \
-       --build-arg proton_branch=$old_proton_branch \
-       --build-arg dispatch_branch=$old_dispatch_branch \
-       --build-arg dispatch_url=$old_dispatch_url .
-
-podman build --tag dispatch-tester/interiora:1 --file ContainerFile \
-       --build-arg config_file=InteriorA.conf \
+podman build --tag smoketest/newbase:1 \
+       --file ../../containers/Container-custom \
        --build-arg proton_branch=$proton_branch \
        --build-arg dispatch_branch=$dispatch_branch \
        --build-arg dispatch_url=$dispatch_url .
 
-podman build --tag dispatch-tester/interiorb:1 --file ContainerFile \
-       --build-arg config_file=InteriorB.conf \
-       --build-arg proton_branch=$old_proton_branch \
-       --build-arg dispatch_branch=$old_dispatch_branch \
-       --build-arg dispatch_url=$old_dispatch_url .
+podman build --tag smoketest/oldbase:1 \
+       --file ../../containers/Container-fedora .
 
-podman build --tag dispatch-tester/edge2:1 --file ContainerFile \
-       --build-arg config_file=Edge2.conf \
-       --build-arg proton_branch=$proton_branch \
-       --build-arg dispatch_branch=$dispatch_branch \
-       --build-arg dispatch_url=$dispatch_url .
+##
 
-podman run -d --name InteriorA --net=host dispatch-tester/interiora:1
-podman run -d --name InteriorB --net=host dispatch-tester/interiorb:1
-podman run -d --name Edge1 --net=host dispatch-tester/edge1:1
-podman run -d --name Edge2 --net=host dispatch-tester/edge2:1
+podman build --tag smoketest/edgeold:1 \
+       --file ../../containers/Container-config \
+       --build-arg base_image=smoketest/oldbase:1 \
+       --build-arg config_file=config/EdgeOld.conf .
+
+podman build --tag smoketest/interiorold:1 \
+       --file ../../containers/Container-config \
+       --build-arg base_image=smoketest/oldbase:1 \
+       --build-arg config_file=config/InteriorOld.conf .
+
+podman build --tag smoketest/edgenew:1 \
+       --file ../../containers/Container-config \
+       --build-arg base_image=smoketest/newbase:1 \
+       --build-arg config_file=config/EdgeNew.conf .
+
+podman build --tag smoketest/interiornew:1 \
+       --file ../../containers/Container-config \
+       --build-arg base_image=smoketest/newbase:1 \
+       --build-arg config_file=config/InteriorNew.conf .
+
+##
+
+# use port 10000 to snoop inter-router messages
+# use port 20000 and 20001 to snoop edge messages
+podman pod create --name compat \
+       -p 10000:10000 \
+       -p 20000:20000 \
+       -p 20001:20001 \
+       -p 45672:45672 \
+       -p 35672:35672 \
+       -p 25672:25672 \
+       -p 15672:15672
+
+podman run -d --rm --pod compat --name EdgeOld \
+       smoketest/edgeold:1
+podman run -d --rm --pod compat --name InteriorNew \
+       smoketest/interiornew:1
+podman run -d --rm --pod compat --name InteriorOld \
+       smoketest/interiorold:1
+podman run -d --rm --pod compat --name EdgeNew \
+       smoketest/edgenew:1
 set +x
 

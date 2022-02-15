@@ -1,3 +1,5 @@
+podman build --tag smoketest/edgeold:1 --file ./ContainerFileOld --build-arg config_file=EdgeOld.conf .
+podman build --tag smoketest/interiorold:1 --file ./ContainerFileOld --build-arg config_file=InteriorOld.conf .
 
 
 ./setup.sh -p 0.35.0 -D 1.18.0 -d DISPATCH-1487-ma-compose-send -u https://github.com/kgiusti/dispatch/archive/refs/heads

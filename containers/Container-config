@@ -17,14 +17,16 @@
 # under the License.
 #
 
-FROM quay.io/kgiusti0/qpid-dispatch-router
-LABEL description="qdrouterd image for compatibility testing"
+# Generate a container image based on an existing image but
+# with a parameterized router configuration file
+
+ARG base_image
+FROM ${base_image}
+LABEL description="qdrouterd image; custom config"
 MAINTAINER Ken Giusti <kgiusti@gmail.com>
 
-ARG config_file
-ENV config_file ${config_file:-qdrouter.conf}
-
+ARG config_file=qdrouterd.conf
 COPY ${config_file} /etc/qpid-dispatch/qdrouterd.conf
 
 ENTRYPOINT ["/sbin/qdrouterd"]
-CMD ["-c", "/etc/qpid-dispatch/qdrouterd.conf"]
+

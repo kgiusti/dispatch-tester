@@ -1,17 +1,14 @@
 #!/bin/bash
 
-# set -x
-podman stop Edge1
-podman stop Edge2
-podman stop InteriorA
-podman stop InteriorB
+set -e
+set -x
 
-podman rm Edge1
-podman rm Edge2
-podman rm InteriorA
-podman rm InteriorB
+podman pod rm -f compat
+podman rmi -f smoketest/newbase:1
+podman rmi -f smoketest/oldbase:1
+podman rmi -f smoketest/interiornew:1
+podman rmi -f smoketest/interiorold:1
+podman rmi -f smoketest/edgenew:1
+podman rmi -f smoketest/edgeold:1
 
-podman rmi dispatch-tester/edge1:1
-podman rmi dispatch-tester/edge2:1
-podman rmi dispatch-tester/interiora:1
-podman rmi dispatch-tester/interiorb:1
+set +x
