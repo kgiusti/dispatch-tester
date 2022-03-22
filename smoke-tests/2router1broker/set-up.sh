@@ -41,10 +41,10 @@ if [ $# -ne 1 ]; then
 fi
 
 CTOOL=${CTOOL:-podman}
-proton_branch=${proton_branch:-"master"}
+proton_branch=${proton_branch:-"main"}
 old_proton=${old_proton:-$proton_branch}
 
-dispatch_branch=${dispatch_branch:-"master"}
+dispatch_branch=${dispatch_branch:-"main"}
 dispatch_url=${dispatch_url:-"https://gitbox.apache.org/repos/asf/qpid-dispatch.git"}
 old_dispatch=${old_dispatch:-$dispatch_branch}
 old_dispatch_url=${old_dispatch_url:-$dispatch_url}
