@@ -1,2 +1,6 @@
-FROM nginx
+FROM docker.io/library/nginx:latest
 COPY data /usr/share/nginx/html/
+COPY default.conf /etc/nginx/conf.d/default.conf
+COPY chained.pem /etc/nginx/
+COPY server-private-key-no-pass.pem /etc/nginx/
+

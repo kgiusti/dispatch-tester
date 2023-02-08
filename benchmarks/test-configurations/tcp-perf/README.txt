@@ -17,3 +17,8 @@ numactl --physcpubind=3,7 hey/bin/hey_linux_amd64 -c 20 -z 20s http://127.0.0.1:
 numactl --physcpubind=3,7 hey/bin/hey_linux_amd64 -c 20 -z 20s http://127.0.0.1:8000/t10K.html
 numactl --physcpubind=3,7 hey/bin/hey_linux_amd64 -c 20 -z 20s http://127.0.0.1:8000/t100K.html
 numactl --physcpubind=3,7 hey/bin/hey_linux_amd64 -c 20 -z 20s http://127.0.0.1:8000/t1M.html
+
+---
+
+iperf3  --server --port 8800 &
+iperf3  --client 127.0.0.1 --port 8000

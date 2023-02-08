@@ -19,6 +19,11 @@
 
 # Generate a container image based on an existing image but
 # with a parameterized router configuration file
+# Example:
+# $ podman build --tag myrouter:1 \
+#     --build-arg base_image=quay.io/kgiusti0/qpid-dispatch-router:1.18.0 \
+#     --build-arg config_file=my_config.conf \
+#     --file Container-config .
 
 ARG base_image
 FROM ${base_image}
