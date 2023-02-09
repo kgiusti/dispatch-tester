@@ -14,6 +14,8 @@ numactl --physcpubind=3,7 hey/bin/hey_linux_amd64 -c 2 -z 20s http://127.0.0.1:8
 numactl --physcpubind=3,7 hey/bin/hey_linux_amd64 -c 2 -z 20s http://127.0.0.1:8000/t100K.html
 numactl --physcpubind=3,7 hey/bin/hey_linux_amd64 -c 2 -z 20s http://127.0.0.1:8000/t1M.html
 
+numactl --physcpubind=3,7 hey/bin/hey_linux_amd64 -c 2 -z 20s https://localhost:8100/t1K.html
+
 # Better load testing tool is 'wrk' (https://github.com/wg/wrk.git)
 # example:  two client connections using two threads running for 20 seconds:
 #
