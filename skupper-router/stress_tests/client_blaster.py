@@ -74,10 +74,11 @@ def run_client(host, port, count):
     get_req += f'Host: {host}:{port}\r\n'
     get_req += '\r\n'
     get_req = get_req.encode()
+    print(f"Request size: {len(get_req)} octets")
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
         client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        client.settimeout(1.0)
+        client.setblocking(True)
         while True:
             try:
                 client.connect((host, port))
@@ -86,14 +87,20 @@ def run_client(host, port, count):
                 print("Conn refused... retrying")
                 sleep(1)
 
-        #print(f"Sending[{get_req.decode()}]")
-        for _ in range(count):
+        print(f"Sending {count} requests")
+        for req in range(count):
             client.sendall(get_req)
+            print(f"Sent {req} request")
+        print(f"All {count} requests sent")
 
-        for _ in range(count):
+        print(f"Getting {count} responses")
+        for resp in range(count):
             if get_response(client) is False:
                 # client socket closed
                 break
+            print(f"Got {resp} response")
+        print(f"{count} responses received")
+
         client.close()
 
 def main(argv):

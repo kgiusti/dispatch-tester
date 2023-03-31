@@ -37,7 +37,7 @@ def readline(conn):
         if octet == b'\n':
             return data
 
-def handle_requests(conn):
+def handle_requests(conn, delay):
     # print("Handle request")
 
     while True:
@@ -57,7 +57,7 @@ def handle_requests(conn):
 
         # drain the body (if it exists). Use a long timeout to simulate a slow
         # response
-        conn.settimeout(5.0)
+        conn.settimeout(delay)
         try:
             while True:
                 rc = conn.recv(4096)
@@ -74,9 +74,12 @@ def handle_requests(conn):
         conn.sendall(b"content-length: 0\r\n\r\n")
 
 def main(argv):
-    if len(argv) != 3:
-        print(f"Usage: {argv[0]} host port")
+    if len(argv) < 3 or len(argv) > 4:
+        print(f"Usage: {argv[0]} host port [delay]")
         return 1
+    delay = 5.0
+    if len(argv) == 4:
+        delay = float(argv[3])
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -87,7 +90,7 @@ def main(argv):
         try:
             while True:
                 conn, _ = listener.accept()
-                handle_requests(conn)
+                handle_requests(conn, delay)
         except KeyboardInterrupt:
             print("Done")
             return 0
