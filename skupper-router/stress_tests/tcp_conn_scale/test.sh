@@ -34,7 +34,7 @@ sleep 5
 echo -e "\nBegin test..."
 for (( iteration=0 ; iteration<$TEST_RUNS ; iteration+=1 )) ; do
     ./tcp-conn-scale $MAX_CONNS $ROUTER_HOST $CLIENT_PORT $SERVER_PORT
-    sleep 1
+    sleep 5
 done
 
 echo -e "\n... test complete"

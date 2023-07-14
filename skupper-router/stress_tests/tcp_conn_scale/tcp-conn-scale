@@ -85,10 +85,12 @@ def main(argv):
     finally:
         for client in client_socks:
             client.shutdown(socket.SHUT_WR)  # half-close
-            client.close()
+        sleep(1.0)
         for server in server_socks:
-            server.shutdown(socket.SHUT_RDWR)
             server.close()
+        sleep(1.0)
+        for client in client_socks:
+            client.close()
 
     print("Done", flush=True)
 
