@@ -5,7 +5,7 @@
 # Assumes an http server (nginx) is listening on port 8800 and will
 # serve /index.html
 
-# set -x
+set -x
 
 set -e
 
@@ -18,6 +18,11 @@ NGINX_PORT="8800"
 ROUTER_HOST="127.0.0.1"
 ROUTER_PORT=8000
 
+# attempt to force open file maximum to the hard limit:
+FMAX_LIMIT=$(ulimit -H -n)
+ulimit -S -n $FMAX_LIMIT
+
+podman start nginx-perf
 
 rm -f skrouterd-ingress-log.txt
 numactl --physcpubind=3 skrouterd -c skrouterd-ingress.conf &
@@ -34,7 +39,7 @@ sleep 5
 # nginx (no routers) if the RATE exceeds 500/sec or CONNS exceeds 5000
 
 HP_RATE=500
-HP_CONNS=5000
+HP_CONNS=10000
 HP_CALLS=1
 HP_TIMEOUT=5
 
@@ -49,6 +54,10 @@ done
 
 echo =e "\n... test complete"
 
+skstat -m -r RouterHttperfIngress
+skstat -m -r RouterHttperfEgress
+
 kill $ROUTER_PIDS
 wait $ROUTER_PIDS
 
+podman stop nginx-perf
