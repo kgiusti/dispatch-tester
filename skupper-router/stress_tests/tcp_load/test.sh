@@ -3,7 +3,7 @@
 
 # set -x
 
-TEST_RUNS=3
+TEST_RUNS=10
 
 iperf3 -s -p 5002 &
 SERVER_PIDS="$! "
