@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License
+#
+
+#
+# Test client that does a half-close transfer over TCP.
+# Expects to connect to skrouterd listener at 127.0.0.1:8000
+#
+
+import socket
+import sys
+
+from time import sleep, time
+
+# Usage: client-half-close <host-address <port>>
+
+pause = 2.0  # pause between operations
+
+def main(argv):
+
+    host_address = argv[1] if len(argv) > 1 else "127.0.0.1"
+    port = int(argv[2]) if len(argv) > 2 else 8000
+
+    print(f"Client connecting to router @ {host_address}:{port}...")
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
+            client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            client.setblocking(True)
+            while True:
+                try:
+                    client.connect((host_address, port))
+                    break
+                except ConnectionRefusedError:
+                    print("Client: conn refused... retrying")
+                    sleep(1)
+            print("Client: connected!")
+            sleep(pause)
+            print("Client: sending 'Half-close hello!'")
+            client.sendall(b'Half-close hello!')
+            sleep(pause)
+            print(f"Client: send done, closings write-side of the socket @ {time()}")
+            client.shutdown(socket.SHUT_WR)
+            sleep(pause)
+            print("Client: attempting to read response...")
+            while True:
+                data = client.recv(4096)
+                if data == b'':
+                    break;
+                print(f"Client: read '{data.decode()}'")
+
+            print(f"Client: detected recv socket has closed @ {time()}")
+            sleep(pause)
+            print("Client: closing the socket")
+            client.close()  # redundant, yes. I'm paranoid...
+
+    except KeyboardInterrupt:
+        print("Client Done")
+        return 0
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+
