@@ -44,11 +44,14 @@
 #include <assert.h>
 
 
+#define MIN(X,Y) ((X) > (Y) ? (Y) : (X))
+
 // body data - block of 0's
 //
 
 bool stop = false;
 bool debug_mode = false;
+bool verbose = false;
 
 int links = 1;        // # sending links to open, one messages sent per link
 
@@ -57,6 +60,8 @@ char _addr[] = "127.0.0.1:5672";
 char *host_address = _addr;
 char *container_name = "OOMSender";
 char proactor_address[1024];
+
+uint64_t total_bytes;
 
 pn_connection_t *pn_conn;
 pn_proactor_t *proactor;
@@ -147,7 +152,14 @@ static bool event_handler(pn_event_t *event)
         //
         static long tag = 0;  // a simple tag generator
         pn_link_t *sender = pn_event_link(event);
-        int credit = pn_link_credit(sender);
+        const int credit = pn_link_credit(sender);
+        const size_t win_capacity = pn_transport_get_remote_max_frame(pn_connection_transport(pn_conn))
+            * pn_session_remote_incoming_window(pn_link_session(sender));
+        const size_t ob = pn_session_outgoing_bytes(pn_link_session(sender));
+
+        debug("Link flow: credit=%d window capacity=%zu (buffered=%zu)\n",
+              credit, win_capacity, ob);
+
         pn_delivery_t *dlv = pn_link_current(sender);
         if (!dlv && credit > 0) {
             // first arrival of credit, start sending the message
@@ -156,17 +168,29 @@ static bool event_handler(pn_event_t *event)
             assert(dlv);
             pn_link_send(sender, (const char *)msg_header, sizeof(msg_header));
             pn_delivery_set_context(dlv, (void *) 0);  // context is the body octet sent counter
+            total_bytes = sizeof(msg_header);
         }
 
         uintptr_t bytes_sent = (uintptr_t) pn_delivery_get_context(dlv);
         size_t to_send = sizeof(body_batch);
-        if (to_send > UINT32_MAX - bytes_sent) {
-            to_send = UINT32_MAX - bytes_sent;
-        }
+        to_send = MIN(to_send, UINT32_MAX - bytes_sent);
         if (to_send > 0) {
-            pn_link_send(sender, body_batch, to_send);
-            bytes_sent += to_send;
-            pn_delivery_set_context(dlv, (void *) bytes_sent);
+            // Respect the remotes incoming window capacity
+            if (win_capacity > ob) {
+                to_send = MIN(to_send, win_capacity - ob);
+                ssize_t rc = pn_link_send(sender, body_batch, to_send);
+                if (rc != to_send) {
+                    fprintf(stderr, "ERROR: pn_link_send failed: %zd\n", rc);
+                    exit(1);
+                }
+                debug("%zu bytes written\n", to_send);
+                bytes_sent += to_send;
+                total_bytes += to_send;
+                pn_delivery_set_context(dlv, (void *) bytes_sent);
+            } else {
+                debug("Session remote in window full, available capacity=%zu buffered=%zu\n",
+                      win_capacity, ob);
+            }
         } else {
             // Message done - start new one when credit arrives
             pn_link_advance(sender);
@@ -231,7 +255,7 @@ static void usage(const char *progname)
     printf("-i \tContainer name [%s]\n", container_name);
     printf("-t \tTarget address [%s]\n", target_address);
     printf("-D \tPrint debug info [off]\n");
-    printf("-D \tPrint debug info [off]\n");
+    printf("-v \tPrint total bytes sent [off]\n");
     printf("\n");
     printf("Sends continually until ^C hit (SIGQUIT)\n");
     exit(1);
@@ -243,7 +267,7 @@ int main(int argc, char** argv)
     /* command line options */
     opterr = 0;
     int c;
-    while ((c = getopt(argc, argv, "ha:l:i:t:D")) != -1) {
+    while ((c = getopt(argc, argv, "ha:l:i:t:Dv")) != -1) {
         switch(c) {
         case 'h': usage(argv[0]); break;
         case 'a': host_address = optarg; break;
@@ -254,6 +278,7 @@ int main(int argc, char** argv)
         case 'i': container_name = optarg; break;
         case 't': target_address = optarg; break;
         case 'D': debug_mode = true; break;
+        case 'v': verbose = true; break;
 
         default:
             usage(argv[0]);
@@ -288,6 +313,7 @@ int main(int argc, char** argv)
         debug("Waiting for proactor event...\n");
         pn_event_batch_t *events = pn_proactor_wait(proactor);
         debug("Start new proactor batch\n");
+        uint64_t start_bytes = total_bytes;
         pn_event_t *event = pn_event_batch_next(events);
         while (event) {
             done = event_handler(event);
@@ -299,6 +325,10 @@ int main(int argc, char** argv)
 
         debug("Proactor batch processing done\n");
         pn_proactor_done(proactor, events);
+
+        if (verbose && total_bytes > start_bytes) {
+            fprintf(stdout, "Bytes send: %"PRIu64"\n", total_bytes);
+        }
     }
 
     pn_proactor_free(proactor);
